@@ -1,0 +1,11 @@
+node_modules/
+
+# dados locais gerados em execução (pareamento, cores, cotação, calibração, uso da conta)
+data/
+
+# ferramentas locais / rascunhos
+.claude/
+public-next/
+*.log
+.env
+.DS_Store

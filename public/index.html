@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <meta name="theme-color" content="#000000">
+  <meta name="color-scheme" content="dark">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
+  <meta name="description" content="Monitor de mesa em tempo real para o Claude Code">
+  <title>ClawdDesk</title>
+  <link rel="manifest" href="/manifest.json">
+  <link rel="icon" href="/icons/favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/icons/icon-192.png">
+  <link rel="preload" href="/fonts/chakra-petch-latin-600-normal.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body data-state="idle" data-mood="idle" data-warn="0" data-sim="0">
+  <div id="app">
+    <header class="topbar">
+      <div class="brand">
+        <span id="conn" class="conn" data-on="0" title="Conexão com o PC"></span>
+        <span class="brand-name">CLAWD<b>DESK</b></span>
+        <span id="plan" class="plan"></span>
+        <span class="sim-badge">SIMULAÇÃO</span>
+      </div>
+      <div class="controls">
+        <span id="clock" class="clock-small">--:--</span>
+        <button id="awake" class="icon-btn" type="button" data-on="0" aria-label="Manter tela ligada">🌙</button>
+        <button id="sim-btn" class="icon-btn" type="button" aria-label="Simular estados" title="Simular estados (teclas 1–8)">🧪</button>
+        <button id="mute" class="icon-btn" type="button" aria-label="Som">🔊</button>
+        <input id="volume" class="volume" type="range" min="0" max="100" step="5" aria-label="Volume">
+        <button id="full" class="icon-btn" type="button" aria-label="Tela cheia">⛶</button>
+      </div>
+    </header>
+
+    <main class="grid">
+      <!-- núcleo: sessão em destaque -->
+      <section class="panel core">
+        <div class="core-visual">
+          <svg class="ring" viewBox="0 0 200 200" aria-hidden="true">
+            <circle class="ring-ticks" cx="100" cy="100" r="95"></circle>
+            <circle class="ring-track" cx="100" cy="100" r="86"></circle>
+            <circle id="ring-arc" class="ring-arc" cx="100" cy="100" r="86"></circle>
+            <g class="ring-spin"><circle cx="100" cy="100" r="76"></circle></g>
+            <g class="ring-spin2"><circle cx="100" cy="100" r="68"></circle></g>
+          </svg>
+          <div class="glow"></div>
+          <svg id="mascot" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"></svg>
+          <div id="particles" class="particles"></div>
+          <div id="ring-label" class="ring-label"></div>
+        </div>
+        <div class="core-info">
+          <div id="core-project" class="core-project"></div>
+          <div id="state-label" class="state-label">PRONTO</div>
+          <div id="state-detail" class="state-detail">Aguardando comandos</div>
+          <div id="state-meta" class="state-meta"></div>
+          <div id="core-time" class="core-time"></div>
+          <div id="core-git" class="core-git"></div>
+          <div class="bigclock-box"><span id="bigclock" class="bigclock">--:--</span><span id="bigdate" class="bigdate"></span></div>
+        </div>
+        <div class="feed">
+          <div class="panel-title"><span><span class="ft-act">// ATIVIDADE</span><span class="ft-tl">// HOJE</span></span><span id="feed-who" class="pt-right"></span></div>
+          <ol id="feed" class="feed-list"></ol>
+          <div id="feed-tl" class="tl-rows feed-tl"></div>
+        </div>
+      </section>
+
+      <!-- limites da conta -->
+      <section class="panel limits">
+        <div class="panel-title"><span>// LIMITES</span><span id="limits-note" class="pt-right"></span></div>
+        <div id="m-5h" class="meter" data-level="0">
+          <div class="meter-head"><span class="meter-label">SESSÃO 5H</span><span class="meter-sub"></span><span class="meter-value"><span class="num">—</span><span class="unit">%</span></span></div>
+          <div class="bar"><div class="fill"></div></div>
+        </div>
+        <div id="m-7d" class="meter" data-level="0">
+          <div class="meter-head"><span class="meter-label">SEMANA</span><span class="meter-sub"></span><span class="meter-value"><span class="num">—</span><span class="unit">%</span></span></div>
+          <div class="bar"><div class="fill"></div><div class="fill-share"></div></div>
+        </div>
+        <div id="models" class="models"></div>
+        <div id="pace" class="pace" data-level="0" hidden></div>
+      </section>
+
+      <!-- todas as sessões -->
+      <section class="panel sessions">
+        <div class="panel-title"><span>// SESSÕES</span><span id="sessions-count" class="pt-right"></span></div>
+        <div id="session-list" class="session-list"></div>
+      </section>
+
+      <!-- linha do tempo do dia -->
+      <section class="panel timeline">
+        <div class="panel-title"><span>// HOJE</span><span id="tl-total" class="pt-right"></span></div>
+        <div id="tl-rows" class="tl-rows"></div>
+        <div class="tl-axis"><span id="tl-from"></span><span id="tl-mid"></span><span id="tl-to"></span></div>
+      </section>
+    </main>
+  </div>
+
+  <div id="flash" class="flash-border" aria-hidden="true"></div>
+  <div id="notices" class="notices" aria-live="polite"></div>
+
+  <div id="overlay" class="overlay">
+    <div class="overlay-card">
+      <div class="ov-icon">👆</div>
+      <div class="ov-title">Toque para ativar modo mesa</div>
+      <div class="ov-sub">Mantém a tela sempre ligada, libera os alertas sonoros e entra em tela cheia.</div>
+      <div id="tip-insecure" class="ov-tip" hidden>
+        <b>Para instalar como app (opcional):</b> no Chrome do celular abra
+        <code>chrome://flags/#unsafely-treat-insecure-origin-as-secure</code>, adicione este endereço,
+        ative e reinicie o Chrome. Depois: menu ⋮ → <i>Instalar app</i>.
+      </div>
+      <div id="qr-box" class="ov-qr" hidden>
+        <div id="qr" class="qr"></div>
+        <div>Aponte a câmera do celular:<br><b id="qr-url"></b>
+          <div id="pc-code-box" class="pc-code" hidden>Código para parear e aprovar pelo celular:<br><b id="pc-code"></b></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="pair-panel" class="pair-panel" hidden>
+    <div class="pair-card">
+      <div class="pair-head"><b>🔐 Aprovar pedidos pelo celular</b><button id="pair-close" class="sim-close" type="button">✕</button></div>
+      <div id="pair-form">
+        <div class="pair-sub">Digite o código de 6 números que aparece no terminal do PC, na linha
+          <i>"Código para parear o celular"</i> (onde roda o <code>npm start</code>).</div>
+        <input id="pair-code" class="pair-input" type="tel" inputmode="numeric" maxlength="7" placeholder="000 000" autocomplete="off">
+        <div class="pair-row">
+          <button id="pair-go" class="sim-btn" type="button">Parear</button>
+          <button id="pair-cancel" class="sim-btn ghost" type="button">Cancelar</button>
+        </div>
+      </div>
+      <div id="pair-done" hidden>
+        <div class="pair-sub">✓ Este aparelho está pareado. Quando o Claude pedir permissão, o aviso âmbar
+          mostra <b>Permitir</b> e <b>Negar</b>. O pedido continua aparecendo no PC: vale a primeira resposta.</div>
+        <button id="pair-forget" class="sim-btn stop" type="button">Desparear este aparelho</button>
+      </div>
+      <div id="pair-msg" class="pair-msg"></div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast" hidden></div>
+  <div id="sim-panel" class="sim-panel" hidden></div>
+
+  <script type="module" src="/js/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,43 @@
+{
+  "name": "clawd-desk",
+  "version": "1.0.0",
+  "description": "Transforma um celular (ou tablet) antigo em um monitor de mesa sempre ligado para o Claude Code: estados em tempo real, limites de uso, avisos e aprovação de permissões pelo celular, pela rede Wi-Fi local.",
+  "type": "module",
+  "main": "server/index.js",
+  "private": true,
+  "scripts": {
+    "start": "node server/index.js",
+    "restart": "node scripts/restart.js",
+    "setup-hooks": "node scripts/setup-hooks.js",
+    "remove-hooks": "node scripts/setup-hooks.js --uninstall",
+    "demo": "node scripts/demo.js",
+    "icons": "node scripts/gen-icons.js"
+  },
+  "keywords": [
+    "claude-code",
+    "claude",
+    "monitor",
+    "dashboard",
+    "hooks",
+    "pwa",
+    "android"
+  ],
+  "author": "flavio-r",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/flavio-r/clawd-desk.git"
+  },
+  "homepage": "https://github.com/flavio-r/clawd-desk#readme",
+  "bugs": {
+    "url": "https://github.com/flavio-r/clawd-desk/issues"
+  },
+  "engines": {
+    "node": ">=18.17"
+  },
+  "dependencies": {
+    "express": "^5.3.0",
+    "qrcode": "^1.5.4",
+    "ws": "^8.23.0"
+  }
+}
