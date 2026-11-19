@@ -6,6 +6,7 @@
   "main": "server/index.js",
   "private": true,
   "scripts": {
+    "setup": "node scripts/setup.js",
     "start": "node server/index.js",
     "restart": "node scripts/restart.js",
     "setup-hooks": "node scripts/setup-hooks.js",

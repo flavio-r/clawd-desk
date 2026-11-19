@@ -1,0 +1,4 @@
+# Finais de linha certos para os atalhos de dois cliques
+*.bat      text eol=crlf
+*.command  text eol=lf
+*.sh       text eol=lf

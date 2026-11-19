@@ -181,6 +181,7 @@ function install() {
   console.log(`  ${c.g('✔')} Eventos: ${events.join(', ')}${minimal ? '' : c.d(' (assíncronos, não deixam o Claude mais lento)')}`);
   if (!minimal) console.log(`  ${c.g('✔')} PermissionRequest: espera sua resposta pelo celular pareado ${c.d('(o pedido continua aparecendo no PC)')}`);
   console.log(`  ${c.g('✔')} ${statusNote}`);
+  if (flag('--from-setup')) return; // o assistente (npm run setup) continua daqui
   console.log(`\n  ${c.y('→')} Reinicie as sessões abertas do Claude Code para carregar os hooks.`);
   console.log(`  ${c.y('→')} Depois: ${c.b('npm start')} e abra o endereço mostrado no celular.`);
   console.log(c.d(`  Para desfazer: npm run remove-hooks\n`));

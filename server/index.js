@@ -358,6 +358,21 @@ server.listen(cfg.PORT, cfg.HOST, async () => {
     `  🔐 Código para parear o celular (aprovar pedidos por ele): ${b(approvals.codeFormatted)}` +
       d(approvals.devices.length ? `  · ${approvals.devices.length} aparelho(s) já pareado(s)` : '')
   );
+  // passo a passo para quem está configurando pela primeira vez (npm run setup)
+  if (process.env.CLAWDDESK_GUIDE === '1') {
+    const y = (s) => `\x1b[33m${s}\x1b[0m`;
+    console.log('');
+    console.log(`  ${b('📱 Agora no celular:')}`);
+    console.log(`   ${y('1.')} Conecte o celular no ${b('mesmo Wi-Fi')} deste computador.`);
+    console.log(`   ${y('2.')} Abra a ${b('câmera')} e aponte para o QR Code acima` + (phoneUrl ? ` (ou digite no navegador: ${c(phoneUrl)})` : '') + '.');
+    console.log(`   ${y('3.')} Toque em ${b('"Toque para ativar modo mesa"')}. Pronto, o monitor está funcionando!`);
+    console.log(`   ${y('4.')} ${d('Opcional:')} para aprovar pedidos pelo celular, toque em ${b('🧪 → Parear / gerenciar')} e digite ${b(approvals.codeFormatted)}.`);
+    console.log(`   ${y('5.')} Reinicie as sessões do Claude Code que já estavam abertas.`);
+    console.log('');
+    console.log(`  ${d('Para testar sem gastar nada: toque em 🧪 no celular e escolha "Demo automático".')}`);
+    console.log(`  ${d('Da próxima vez, basta')} ${b('npm start')} ${d('(ou dois cliques no arquivo ClawdDesk).')}`);
+    console.log(`  ${d('Se o macOS perguntar se o "node" pode aceitar conexões de entrada, clique em Permitir.')}`);
+  }
   console.log(`  ${d('Ctrl+C para encerrar.')}\n`);
   usage.start();
   fx.start();

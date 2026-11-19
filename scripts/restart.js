@@ -41,10 +41,10 @@ function cwdOf(pid) {
   }
 }
 
-// É o ClawdDesk? (iniciado por "npm start" → server/index.js, ou por "npm run restart" → scripts/restart.js)
+// É o ClawdDesk? (iniciado por "npm start", "npm run restart" ou "npm run setup")
 function isClawdDesk(pid) {
   const cmd = commandOf(pid);
-  if (!/(server[\\/]index|scripts[\\/]restart)\.js/.test(cmd)) return false;
+  if (!/(server[\\/]index|scripts[\\/](restart|setup))\.js/.test(cmd)) return false;
   const cwd = cwdOf(pid);
   return !cwd || path.resolve(cwd) === ROOT || cmd.includes(ROOT);
 }

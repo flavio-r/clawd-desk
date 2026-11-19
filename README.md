@@ -12,8 +12,93 @@ negue pedidos de permissão direto pelo celular** — tudo pela sua rede Wi-Fi, 
 
 ---
 
+## 🚀 Comece aqui (passo a passo)
+
+Não precisa saber programar. São 5 passos e leva uns 5 minutos.
+
+### Passo 1 — Instale o Node.js (só na primeira vez)
+
+1. Abra **[nodejs.org](https://nodejs.org)** e baixe a versão **LTS** (o botão verde).
+2. Abra o arquivo baixado e instale, só clicando em *Continuar/Avançar*.
+
+> Você também precisa do **Claude Code** instalado e já usado pelo menos uma vez neste computador
+> (no terminal ou no app do Claude).
+
+### Passo 2 — Baixe o ClawdDesk
+
+1. No topo desta página, clique no botão verde **`<> Code`** → **Download ZIP**.
+2. Descompacte o arquivo (dois cliques nele) e coloque a pasta **`clawd-desk-main`** onde quiser,
+   por exemplo em *Documentos*.
+
+<sub>Quem usa git pode, em vez disso: `git clone https://github.com/flavio-r/clawd-desk.git`</sub>
+
+### Passo 3 — Abra o ClawdDesk
+
+Dentro da pasta, dê **dois cliques** no arquivo do seu sistema:
+
+| Sistema | Arquivo | Se aparecer um aviso de segurança na primeira vez |
+|---|---|---|
+| **Mac** | `ClawdDesk.command` | Clique com o **botão direito** no arquivo → **Abrir** → **Abrir** |
+| **Windows** | `ClawdDesk.bat` | Clique em **Mais informações** → **Executar assim mesmo** |
+| **Linux** | — | Abra um terminal na pasta e rode `npm run setup` |
+
+<sub>Testado no macOS. No Windows e no Linux deve funcionar do mesmo jeito; se algo der errado, abra uma [issue](https://github.com/flavio-r/clawd-desk/issues).</sub>
+
+Vai abrir uma janela com um **assistente** que faz tudo sozinho:
+
+```
+  🤖 Bem-vindo ao ClawdDesk!
+  Vou preparar tudo em 4 passos. Leva cerca de 1 minuto.
+
+[1/4] Verificando o computador
+  ✔ Node.js 22.11.0
+  ✔ Claude Code encontrado
+  ✔ Dependências instaladas
+
+[2/4] Conectando ao Claude Code
+  Para saber o que o Claude Code está fazendo, o ClawdDesk adiciona hooks às
+  configurações dele. Antes, faço um backup do arquivo.
+  Posso conectar ao Claude Code? (S/n)          ← aperte Enter
+
+[3/4] Iniciando o monitor
+[4/4] Conectando o celular
+  No celular:  http://192.168.0.10:3456
+  [QR Code]
+  📱 Agora no celular: …
+```
+
+Quando ele perguntar **"Posso conectar ao Claude Code?"**, aperte **Enter** (sim). Ele faz um backup
+das configurações do Claude Code antes de mexer, e tudo pode ser desfeito depois.
+
+> **Deixe essa janela aberta** enquanto quiser usar o monitor: fechar a janela desliga o ClawdDesk.
+> No Mac, se aparecer *"Deseja que o node aceite conexões de entrada?"*, clique em **Permitir**.
+
+### Passo 4 — Conecte o celular
+
+1. Deixe o celular no **mesmo Wi-Fi** do computador.
+2. Abra a **câmera** do celular e aponte para o **QR Code** que apareceu na janela
+   (ou digite no navegador do celular o endereço `http://…:3456` mostrado logo acima dele).
+3. Toque em **"Toque para ativar modo mesa"**.
+
+Pronto! 🎉 Reinicie as sessões do Claude Code que já estavam abertas e use normalmente: o celular
+mostra tudo em tempo real. Para ver as animações sem gastar nada, toque em **🧪 → Demo automático**.
+
+### Passo 5 — (Opcional) Aprovar pedidos pelo celular
+
+No celular, toque em **🧪 → Parear / gerenciar** e digite o **código de 6 números** que aparece na
+janela do computador. A partir daí, quando o Claude pedir permissão, o celular mostra **Permitir** e
+**Negar**.
+
+### Da próxima vez
+
+É só dar **dois cliques no mesmo arquivo** (ou rodar `npm start` na pasta). O celular reconecta
+sozinho — se ele estiver com a página aberta, nem precisa fazer nada.
+
+---
+
 ## Sumário
 
+- [Comece aqui (passo a passo)](#-comece-aqui-passo-a-passo)
 - [Recursos](#recursos)
 - [Como funciona](#como-funciona)
 - [Requisitos](#requisitos)
@@ -125,6 +210,9 @@ O layout se reorganiza ao girar a tela. Em tablets (ou no navegador do PC) a tel
 
 ## Instalação
 
+> O jeito mais fácil é o [passo a passo acima](#-comece-aqui-passo-a-passo) (dois cliques no
+> `ClawdDesk.command` / `ClawdDesk.bat`, ou `npm run setup`). Abaixo, o caminho manual pelo terminal.
+
 ```bash
 git clone https://github.com/flavio-r/clawd-desk.git
 ```
@@ -217,6 +305,7 @@ Detalhes:
 
 | Comando | O que faz |
 |---|---|
+| `npm run setup` | Assistente guiado: verifica tudo, conecta ao Claude Code (perguntando antes) e inicia o monitor. Pode rodar sempre |
 | `npm start` | Sobe o servidor em `0.0.0.0:3456`, mostra IP, QR Code e código de pareamento |
 | `npm run restart` | Encerra o ClawdDesk que estiver rodando (só ele) e sobe a versão atual |
 | `npm run setup-hooks` | Instala/atualiza hooks e statusLine no `~/.claude/settings.json` (com backup) |
@@ -322,7 +411,8 @@ Depois, apague a pasta do projeto. Seu `settings.json` volta ao que era (com bac
 server/    index.js (HTTP + WebSocket + QR) · state.js (sessões) · usage.js (limites, logs, tempo)
            approvals.js (aprovar pelo celular) · git.js · colors.js · fx.js (cotação) · simulator.js
 hooks/     clawddesk-hook.js (eventos) · clawddesk-permission.js (aprovações) · clawddesk-statusline.js
-scripts/   setup-hooks.js · restart.js · demo.js · gen-icons.js
+scripts/   setup.js (assistente) · setup-hooks.js · restart.js · demo.js · gen-icons.js
+ClawdDesk.command / ClawdDesk.bat   atalhos de dois cliques (Mac / Windows)
 public/    index.html · manifest.json · sw.js · css/ · js/ · fonts/ · icons/
 docs/      screenshots/
 data/      gerado em execução (fora do git)
