@@ -1,6 +1,6 @@
 // Service Worker do ClawdDesk: deixa o app instalável e abre a interface mesmo se o PC
 // estiver momentaneamente fora do ar (os dados em tempo real continuam vindo do WebSocket).
-const CACHE = 'clawddesk-v2';
+const CACHE = 'clawddesk-v3';
 const ASSETS = [
   '/',
   '/index.html',
@@ -11,6 +11,7 @@ const ASSETS = [
   '/js/mascot-art.js',
   '/js/audio.js',
   '/js/keepawake.js',
+  '/js/theme.js',
   '/js/burnin.js',
   '/js/simulate.js',
   '/js/format.js',

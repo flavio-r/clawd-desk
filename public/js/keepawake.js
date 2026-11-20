@@ -1,7 +1,7 @@
 // Tela sempre ligada com dupla proteção:
 //  1) Screen Wake Lock API (só existe em contexto seguro: HTTPS ou localhost);
 //  2) fallback para HTTP na rede local: um <video> em tela cheia, atrás de tudo, tocando em loop
-//     um stream gerado por Canvas (preto puro) + trilha silenciosa do Web Audio — o Chrome
+//     um stream gerado por Canvas (na cor de fundo do tema) + trilha silenciosa do Web Audio — o Chrome
 //     segura a tela acesa enquanto há vídeo visível tocando (técnica "NoSleep").
 export class KeepAwake {
   constructor(sfx, onChange) {
@@ -9,9 +9,20 @@ export class KeepAwake {
     this.onChange = onChange || (() => {});
     this.sentinel = null;
     this.video = null;
+    this.ctx = null;
+    this.bg = '#000000';
     this.enabled = false;
     document.addEventListener('visibilitychange', () => this.revive());
     window.addEventListener('focus', () => this.revive());
+  }
+
+  // o vídeo fica atrás de tudo: pinta na cor de fundo do tema (preto no escuro, cinza-claro no claro)
+  setBackground(color) {
+    this.bg = color || '#000000';
+    if (this.ctx) {
+      this.ctx.fillStyle = this.bg;
+      this.ctx.fillRect(0, 0, 64, 36);
+    }
   }
 
   get supportsWakeLock() {
@@ -50,7 +61,8 @@ export class KeepAwake {
     canvas.width = 64;
     canvas.height = 36;
     const ctx = canvas.getContext('2d');
-    ctx.fillStyle = '#000';
+    this.ctx = ctx;
+    ctx.fillStyle = this.bg;
     ctx.fillRect(0, 0, 64, 36);
     if (!canvas.captureStream) return;
     const stream = canvas.captureStream(4);
@@ -80,12 +92,16 @@ export class KeepAwake {
     v.srcObject = stream;
     document.body.insertBefore(v, document.body.firstChild);
     this.video = v;
-    // redesenha 1 pixel a cada segundo para o stream nunca "congelar"
+    // redesenha 1 pixel a cada segundo para o stream nunca "congelar" (variação invisível de cor)
     let flip = false;
     setInterval(() => {
       flip = !flip;
-      ctx.fillStyle = flip ? '#000000' : '#010101';
+      ctx.fillStyle = this.bg;
       ctx.fillRect(0, 0, 1, 1);
+      if (flip) {
+        ctx.fillStyle = 'rgba(128, 128, 128, 0.02)';
+        ctx.fillRect(0, 0, 1, 1);
+      }
     }, 1000);
     v.addEventListener('playing', () => this.onChange(this.status()));
     v.addEventListener('pause', () => this.onChange(this.status()));

@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
   <meta name="theme-color" content="#000000">
-  <meta name="color-scheme" content="dark">
+  <meta name="color-scheme" content="dark light">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black">
@@ -15,6 +15,8 @@
   <link rel="apple-touch-icon" href="/icons/icon-192.png">
   <link rel="preload" href="/fonts/chakra-petch-latin-600-normal.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="/css/style.css">
+  <!-- aplica o tema salvo antes de desenhar a tela (evita piscar escuro→claro) -->
+  <script>try{var q=new URLSearchParams(location.search).get("tema"),m={claro:"light",light:"light",escuro:"dark",dark:"dark",auto:"auto",automatico:"auto"},p=m[q]||m[localStorage.getItem("cd.theme")]||"dark";document.documentElement.dataset.theme=p==="light"||(p==="auto"&&matchMedia("(prefers-color-scheme: light)").matches)?"light":"dark"}catch(e){}</script>
 </head>
 <body data-state="idle" data-mood="idle" data-warn="0" data-sim="0">
   <div id="app">
@@ -27,7 +29,8 @@
       </div>
       <div class="controls">
         <span id="clock" class="clock-small">--:--</span>
-        <button id="awake" class="icon-btn" type="button" data-on="0" aria-label="Manter tela ligada">🌙</button>
+        <button id="awake" class="icon-btn" type="button" data-on="0" aria-label="Manter tela ligada">💤</button>
+        <button id="theme" class="icon-btn" type="button" aria-label="Tema claro ou escuro">🌙</button>
         <button id="sim-btn" class="icon-btn" type="button" aria-label="Simular estados" title="Simular estados (teclas 1–8)">🧪</button>
         <button id="mute" class="icon-btn" type="button" aria-label="Som">🔊</button>
         <input id="volume" class="volume" type="range" min="0" max="100" step="5" aria-label="Volume">

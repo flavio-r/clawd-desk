@@ -5,7 +5,7 @@
 está fazendo, seus limites de uso, quanto tempo o Claude trabalhou em cada projeto, e **aprove ou
 negue pedidos de permissão direto pelo celular** — tudo pela sua rede Wi-Fi, sem nuvem.
 
-![ClawdDesk no celular na horizontal: robô trabalhando, limites e sessões](docs/screenshots/horizontal-trabalhando.png)
+![Demonstração do ClawdDesk: o robô trabalhando, um pedido de permissão aprovado pelo celular, uma pergunta com confete e a troca para o tema claro](docs/demo.gif)
 
 > Projeto independente e não oficial, sem vínculo com a Anthropic. "Claude" e "Claude Code" são
 > marcas da Anthropic. Imagens deste README geradas com o modo de simulação (dados fictícios).
@@ -164,10 +164,20 @@ O layout se reorganiza ao girar a tela. Em tablets (ou no navegador do PC) a tel
 <img src="docs/screenshots/tablet-vertical.png" alt="Tablet na vertical" width="480">
 </details>
 
+### 🌗 Tema escuro e tema claro
+O tema **escuro** (padrão) usa preto puro: em telas OLED gasta menos bateria e não marca a tela. O
+tema **claro** fica melhor em telas LCD e em ambientes bem iluminados. Toque no **🌙** da barra
+superior para alternar entre **escuro → claro → automático** (segue o modo claro/escuro do celular).
+A escolha fica salva no aparelho.
+
+| Tema claro na horizontal | Tema claro na vertical |
+|---|---|
+| <img src="docs/screenshots/claro-horizontal.png" alt="Tema claro com o celular na horizontal" width="560"> | <img src="docs/screenshots/claro-vertical.png" alt="Tema claro com o celular na vertical" width="260"> |
+
 ### E mais
 - 🔔 Avisos com som (sintetizado, sem arquivos de áudio) e vibração para **todas** as sessões:
   concluiu, aguardando resposta, erro.
-- ☀️ Tela sempre ligada (Wake Lock + fallback para HTTP), proteção anti burn-in para OLED.
+- 💡 Tela sempre ligada (Wake Lock + fallback para HTTP), proteção anti burn-in para OLED.
 - 🔄 Atualização automática: ao atualizar o ClawdDesk, o celular recarrega sozinho.
 - 🧪 Modo **simulação** para testar todas as telas, sons e alertas sem gastar tokens.
 
@@ -266,6 +276,16 @@ O `npm start` mostra no terminal:
    tela cheia.
 3. Deixe o celular de pé na mesa, na horizontal ou na vertical.
 
+**Botões da barra superior:**
+
+| Botão | O que faz |
+|---|---|
+| 💡 / 💤 | Tela sempre ligada. 💡 = ativa; 💤 = a tela pode apagar (toque para ativar) |
+| 🌙 / ☀️ / 🌓 | Tema escuro, claro ou automático (segue o celular) |
+| 🧪 | Simulação de estados e pareamento para aprovar pelo celular |
+| 🔊 / 🔇 | Som ligado ou mudo (a barrinha ao lado ajusta o volume; some na vertical) |
+| ⛶ | Tela cheia |
+
 **Para um aparelho dedicado**, vale também ligar *Opções do desenvolvedor → Permanecer ativo* (a tela
 não apaga enquanto carrega) e tirar o Chrome da otimização de bateria.
 
@@ -275,7 +295,8 @@ reinicie o Chrome e use ⋮ → *Instalar app*. Pelo cabo USB: `adb reverse tcp:
 `http://localhost:3456`.
 
 **TV ou monitor sem toque:** abra `http://SEU-IP:3456/?kiosk` — pula a tela de ativação e já mantém
-a tela ligada (o som precisa de um clique/toque).
+a tela ligada (o som precisa de um clique/toque). Para fixar um tema pela URL, acrescente
+`&tema=claro` (ou `escuro`, `auto`), por exemplo `http://SEU-IP:3456/?kiosk&tema=claro`.
 
 ---
 
@@ -399,7 +420,8 @@ Depois, apague a pasta do projeto. Seu `settings.json` volta ao que era (com bac
 - **Barras 5h/Semana com "—":** ainda não chegou leitura oficial. Use o Claude Code no terminal ou faça
   `/login` nele com uma conta de assinatura.
 - **"A porta 3456 já está em uso":** já há um ClawdDesk rodando — use `npm run restart`.
-- **A tela apagou:** toque no 🌙 da barra superior e ligue "Permanecer ativo" nas opções do desenvolvedor.
+- **A tela apagou:** toque no 💤 da barra superior (vira 💡) e ligue "Permanecer ativo" nas opções do
+  desenvolvedor.
 - **Pedidos demorando a aparecer no app desktop com o celular pareado:** rode com
   `CLAWDDESK_APPROVAL_WAIT_DESKTOP_S=0`.
 
@@ -414,7 +436,7 @@ hooks/     clawddesk-hook.js (eventos) · clawddesk-permission.js (aprovações)
 scripts/   setup.js (assistente) · setup-hooks.js · restart.js · demo.js · gen-icons.js
 ClawdDesk.command / ClawdDesk.bat   atalhos de dois cliques (Mac / Windows)
 public/    index.html · manifest.json · sw.js · css/ · js/ · fonts/ · icons/
-docs/      screenshots/
+docs/      demo.gif · screenshots/
 data/      gerado em execução (fora do git)
 ```
 

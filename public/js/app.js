@@ -2,6 +2,7 @@
 import { Mascot } from './mascot.js';
 import { Sfx } from './audio.js';
 import { KeepAwake } from './keepawake.js';
+import { Theme, THEME_ICON, THEME_LABEL } from './theme.js';
 import { startBurnInShift } from './burnin.js';
 import { SimPanel } from './simulate.js';
 import { fmtDuration, fmtTokens, fmtUsd, fmtBrl, fmtClock, fmtDate, fmtWhen, fmtPct, fmtWork, fmtDayMonth } from './format.js';
@@ -30,6 +31,11 @@ const isTouch = window.matchMedia && window.matchMedia('(pointer: coarse)').matc
 const sfx = new Sfx();
 const mascot = new Mascot($('mascot'), $('particles'));
 const awake = new KeepAwake(sfx, () => renderTop());
+const theme = new Theme(() => {
+  awake.setBackground(theme.background);
+  renderTop();
+});
+awake.setBackground(theme.background);
 const sim = new SimPanel($('sim-panel'), sfx, { onPair: () => openPair() });
 
 // pareamento para aprovar pedidos pelo celular (token guardado só neste aparelho)
@@ -1021,7 +1027,10 @@ function renderTop() {
   const a = $('awake');
   a.dataset.on = st.wakeLock || st.video ? '1' : '0';
   a.title = st.wakeLock ? 'Tela sempre ligada (Wake Lock)' : st.video ? 'Tela sempre ligada (vídeo NoSleep)' : 'Tela pode apagar — toque para ativar';
-  setText(a, st.wakeLock ? '☀️' : st.video ? '🌤️' : '🌙');
+  setText(a, st.wakeLock || st.video ? '💡' : '💤');
+  const th = $('theme');
+  setText(th, THEME_ICON[theme.pref]);
+  th.title = 'Tema: ' + THEME_LABEL[theme.pref] + ' — toque para trocar';
   $('conn').dataset.on = connected ? '1' : '0';
   setText($('mute'), sfx.muted ? '🔇' : '🔊');
   const plan = snap && snap.usage && snap.usage.plan;
@@ -1047,6 +1056,15 @@ function activate() {
 
 $('overlay').addEventListener('click', activate);
 $('awake').addEventListener('click', activate);
+let themeToastTimer = 0;
+$('theme').addEventListener('click', () => {
+  const p = theme.cycle();
+  sfx.unlock();
+  sfx.play('tick');
+  showToast(THEME_ICON[p] + ' Tema ' + THEME_LABEL[p] + (p === 'auto' ? ' (segue o celular)' : ''));
+  clearTimeout(themeToastTimer);
+  themeToastTimer = setTimeout(() => showToast(''), 2500);
+});
 $('mute').addEventListener('click', () => {
   sfx.unlock();
   sfx.setMuted(!sfx.muted);
