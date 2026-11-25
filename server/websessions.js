@@ -178,18 +178,30 @@ export class WebSessions extends EventEmitter {
     for (const id of this.track.keys()) if (!seen.has(id)) this.track.delete(id);
   }
 
-  view() {
+  // Separa as sessões da conta: as que aparecem na tela (ativas ou recentes) e quantas ficaram de
+  // fora por serem antigas. As deste PC e dos satélites nem entram na conta.
+  pick() {
     const now = Date.now();
     const excluded = this.getExcluded();
-    const out = [];
+    const shown = [];
+    let old = 0;
     for (const x of this.raw) {
       if (excluded.has(bridgeKey(x.id))) continue; // é uma sessão deste PC (ou de um satélite)
       const st = stateOf(x);
-      const t = this.track.get(x.id) || { since: now, doneAt: 0 };
       const last = Date.parse(x.last_event_at || x.updated_at || x.created_at) || 0;
       const active = st.state === 'thinking' || st.state === 'permission';
-      if (!active && now - last > cfg.WEB_RECENT_MS) continue;
+      if (!active && now - last > cfg.WEB_RECENT_MS) old++;
+      else shown.push({ x, st, last });
+    }
+    shown.sort((a, b) => b.last - a.last);
+    return { shown: shown.slice(0, MAX_SHOWN), old: old + Math.max(0, shown.length - MAX_SHOWN) };
+  }
 
+  view() {
+    const now = Date.now();
+    const out = [];
+    for (const { x, st, last } of this.pick().shown) {
+      const t = this.track.get(x.id) || { since: now, doneAt: 0 };
       const em = x.external_metadata || {};
       const pts = em.post_turn_summary || {};
       const remote = x.environment_kind === 'bridge';
@@ -234,11 +246,15 @@ export class WebSessions extends EventEmitter {
         unread: !!x.unread,
       });
     }
-    out.sort((a, b) => b.lastEventAt - a.lastEventAt);
-    return out.slice(0, MAX_SHOWN);
+    return out; // pick() já ordenou e limitou
   }
 
+  // Para a linha "de onde vêm as sessões": quantas aparecem de cada tipo e quantas antigas ficaram de fora
   info() {
-    return { status: this.status, lastAt: this.lastAt };
+    const base = { status: this.status, lastAt: this.lastAt, recentH: Math.round(cfg.WEB_RECENT_MS / 3600e3) };
+    if (this.status !== 'ok') return base;
+    const { shown, old } = this.pick();
+    const remote = shown.filter((s) => s.x.environment_kind === 'bridge').length;
+    return { ...base, web: shown.length - remote, remote, old };
   }
 }

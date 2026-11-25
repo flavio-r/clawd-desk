@@ -90,6 +90,13 @@
       <section class="panel sessions">
         <div class="panel-title"><span>// SESSÕES</span><span id="sessions-count" class="pt-right"></span></div>
         <div id="session-list" class="session-list"></div>
+        <!-- de onde vêm as sessões; toque para ver como ligar outro PC -->
+        <div id="sources-hint" class="sources-hint" hidden>
+          <div>🖥 <b>Outro PC na mesma rede:</b> instale o ClawdDesk nele e rode <code>npm run link -- <span id="sh-addr">ENDEREÇO</span> CÓDIGO</code>. O código aparece no terminal deste PC.</div>
+          <div>📡 <b>Outro PC fora da rede:</b> ligue o Controle Remoto no Claude Code de lá. As sessões dele chegam aqui pelo claude.ai.</div>
+          <div id="sh-web"></div>
+        </div>
+        <div id="sources" class="sources" role="button" tabindex="0" hidden></div>
       </section>
 
       <!-- linha do tempo do dia -->

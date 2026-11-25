@@ -367,6 +367,13 @@ export class Simulator extends EventEmitter {
       },
       sim: { active: true },
       timeline: this.fakeTimeline(now),
+      // origens de acordo com as sessões fictícias: 2 deste PC, 1 do Notebook, 1 da web
+      remote: {
+        machine: 'este PC',
+        web: { status: 'ok', lastAt: now, recentH: 12, web: 1, remote: 0, old: 3 },
+        satellites: [{ host: 'Notebook', online: true, sessions: 1, at: now }],
+        link: null,
+      },
       approvals: {
         ...(snap.approvals || { pairedDevices: 0, open: [] }),
         open: [...(this.approval ? [this.approval] : []), ...((snap.approvals && snap.approvals.open) || [])],

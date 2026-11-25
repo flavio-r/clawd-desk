@@ -72,7 +72,11 @@ async function link() {
   const u = new URL(url);
   const me = new Set(['localhost', '127.0.0.1', '::1', ...lanAddresses().map((a) => a.address)]);
   if (me.has(u.hostname) && Number(u.port) === cfg.PORT) {
-    console.error(c.r('  ✖ Esse endereço é deste mesmo computador. Use o endereço do OUTRO PC (o que está com o celular).\n'));
+    console.error(c.r('  ✖ Esse endereço é deste mesmo computador, que já é o ClawdDesk principal.'));
+    console.error('    Este comando roda no OUTRO computador, aquele cujas sessões você quer ver aqui.');
+    const lan = lanAddresses()[0];
+    const addr = /^(localhost|127\.|::1)/.test(u.hostname) ? (lan ? lan.address : 'ENDEREÇO') : u.hostname;
+    console.error(`    Lá: instale o ClawdDesk e rode ${c.b(`npm run link -- ${addr} CÓDIGO`)} e depois ${c.b('npm start')}.\n`);
     process.exit(1);
   }
 

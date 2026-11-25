@@ -140,7 +140,11 @@ Além das sessões deste PC, a tela mostra:
 Cada cartão mostra uma etiqueta com a origem. A mesma sessão nunca aparece duas vezes, mesmo com o
 Controle Remoto ligado.
 
-<img src="docs/screenshots/sessoes-origem.png" alt="Painel de sessões com uma sessão deste PC, uma do Notebook (modo satélite) e uma da web" width="620">
+No rodapé do painel, uma linha mostra **de onde o monitor está lendo** e quantas sessões vieram de
+cada lugar: `🖥 ESTE PC 2 · 🖥 NOTEBOOK 1 · ☁️ WEB 1`. Quando não há outro PC ligado, ou quando as
+sessões da web são todas antigas, a linha diz isso. Toque nela para ver como ligar outro computador.
+
+<img src="docs/screenshots/sessoes-origem.png" alt="Painel de sessões com uma sessão deste PC, uma do Notebook (modo satélite) e uma da web, e o rodapé com a contagem de cada origem" width="620">
 
 ### Limites de uso da sua conta
 Janela de 5 horas, limite **semanal**, limites **por modelo** (ex.: Fable "até 50% da semana") e uma
@@ -350,7 +354,7 @@ Usa o Claude Code em mais de um computador? Deixe tudo na mesma tela:
 
   1. No computador **principal** (o do celular), veja no terminal o endereço ("No celular:
      `http://…`") e o **código de pareamento**.
-  2. No **outro** computador, na pasta do ClawdDesk:
+  2. No **outro** computador (não no principal), na pasta do ClawdDesk:
      ```bash
      npm run link -- 192.168.0.10 123456
      ```
@@ -363,6 +367,19 @@ Usa o Claude Code em mais de um computador? Deixe tudo na mesma tela:
   e somem em 2 minutos. Para desfazer: `npm run unlink` no outro computador.
 
   O nome mostrado é o do computador; para trocar: `CLAWDDESK_NAME="Notebook" npm start`.
+- **Outro computador em outra rede** (por exemplo, no escritório): o modo satélite precisa alcançar o
+  principal, e o endereço `192.168.…` só existe dentro da sua rede. Há dois caminhos:
+  - **Controle Remoto**, sem instalar nada: no Claude Code do outro PC, rode `/remote-control` dentro
+    da sessão (no app desktop, ligue o Controle Remoto da sessão). Ela aparece aqui como
+    📡 OUTRO PC, com estado, resumo, contexto e custo, mas sem aprovação pelo celular.
+  - **Tailscale**, com todos os detalhes: instale o [Tailscale](https://tailscale.com/download) nos
+    dois computadores, com a mesma conta. Ele cria uma rede privada só entre os seus aparelhos. No
+    `npm run link`, use o endereço do principal no Tailscale (começa com `100.`).
+
+  Não abra o ClawdDesk para a internet com ngrok, Cloudflare Tunnel ou redirecionamento de porta no
+  roteador: a tela não pede senha (veja [Segurança e privacidade](#segurança-e-privacidade)).
+
+O rodapé do painel de sessões mostra o que está ligado: este PC, cada outro PC e a web.
 
 > Conversas comuns no claude.ai ou no app (fora do Claude Code) não são sessões de código e não
 > aparecem na lista, mas contam nos limites de uso.
@@ -458,7 +475,8 @@ Variáveis de ambiente (ex.: `CLAWDDESK_PORT=3457 npm start`):
 - `POST /api/event`, `/api/statusline` e `/api/permission/request` só aceitam chamadas do próprio PC.
 - Responder pedidos de permissão exige pareamento (código de 6 dígitos, limite de tentativas).
 - O painel em `:3456` é visível para quem estiver na mesma rede e mostra nomes de projetos, pedidos e
-  arquivos. **Use em uma rede confiável.**
+  arquivos. **Use em uma rede confiável** e não o exponha na internet. Para usar de fora de casa, use
+  uma rede privada entre os seus aparelhos, como o Tailscale.
 - Os dados locais (pareamento, cores, calibração, cotação) ficam em `data/`, fora do git.
 
 ---
@@ -494,7 +512,10 @@ Depois, apague a pasta do projeto. Seu `settings.json` volta ao que era (com bac
 - **O outro computador não conecta (modo satélite):** os dois precisam estar no mesmo Wi-Fi, com o
   ClawdDesk aberto no principal. O terminal do outro PC diz se não conseguiu falar com o principal. Se
   o principal pedir para liberar o `node` no firewall, clique em **Permitir**. O código de pareamento
-  muda quando o principal reinicia, mas um PC já ligado continua funcionando.
+  muda quando o principal reinicia, mas um PC já ligado continua funcionando. Se o outro PC estiver
+  em outra rede, veja [Outros computadores](#outros-computadores).
+- **`npm run link` diz que o endereço é deste mesmo computador:** o comando foi rodado no principal.
+  Ele roda no **outro** computador, aquele cujas sessões você quer ver no principal.
 - **"A porta 3456 já está em uso":** já há um ClawdDesk rodando — use `npm run restart`.
 - **A tela apagou:** toque no 💤 da barra superior (vira 💡) e ligue "Permanecer ativo" nas opções do
   desenvolvedor.

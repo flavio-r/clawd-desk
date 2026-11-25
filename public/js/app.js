@@ -427,6 +427,7 @@ function render() {
   renderFeed(p, t);
   renderLimits(u, t);
   renderSessions(s, p, t);
+  renderSources(s);
   renderTimeline(s);
   renderTop();
   syncNoticeActions(t);
@@ -1091,6 +1092,71 @@ function renderSessions(s, p, t) {
   });
 }
 
+// Rodapé do painel de sessões: de onde o monitor está lendo e quantas sessões vieram de cada lugar.
+// Assim fica claro quando outro PC não está ligado, ou quando as sessões da web são todas antigas.
+const WEB_STATUS = {
+  'aguardando-login': 'SEM LOGIN',
+  desativado: 'DESLIGADA',
+  'nao-autorizado': 'LOGIN RECUSADO',
+  'sem-acesso': 'SEM ACESSO',
+  limitado: 'EM PAUSA',
+  erro: 'SEM RESPOSTA',
+};
+function renderSources(s) {
+  const box = $('sources');
+  const r = s && s.remote;
+  box.hidden = !r;
+  if (!r) return;
+  const sessions = s.sessions || [];
+  const items = [{ t: `🖥 ESTE PC ${sessions.filter((x) => !x.origin).length}`, k: 'local' }];
+  if (r.link) {
+    const hub = String(r.link.hub || 'principal').toUpperCase();
+    items.push(r.link.linked ? { t: `🛰 ENVIANDO P/ ${hub}`, k: 'pc' } : { t: `🛰 ${hub}: SEM CONEXÃO`, k: 'warn' });
+  }
+  for (const sat of r.satellites || []) {
+    const host = String(sat.host || 'PC').toUpperCase();
+    items.push(sat.online ? { t: `🖥 ${host} ${sat.sessions}`, k: 'pc' } : { t: `🖥 ${host}: DESLIGADO`, k: 'off' });
+  }
+  if (!r.link && !(r.satellites || []).length) items.push({ t: '🖥 OUTROS PCS: NENHUM', k: 'off' });
+  const w = r.web || {};
+  if (w.status === 'ok') {
+    items.push({ t: `☁️ WEB ${w.web || 0}`, k: w.web ? 'web' : 'off' });
+    if (w.remote) items.push({ t: `📡 CONTROLE REMOTO ${w.remote}`, k: 'remote' });
+  } else {
+    items.push({ t: `☁️ WEB: ${WEB_STATUS[w.status] || 'SEM RESPOSTA'}`, k: w.status === 'desativado' ? 'off' : 'warn' });
+  }
+  items.push({ t: $('sources-hint').hidden ? 'ⓘ' : '✕', k: 'help' });
+
+  const sig = items.map((i) => i.k + i.t).join('|');
+  if (box.dataset.sig !== sig) {
+    box.dataset.sig = sig;
+    box.textContent = '';
+    for (const i of items) {
+      const el = document.createElement('span');
+      el.className = 'src';
+      el.dataset.kind = i.k;
+      el.textContent = i.t;
+      box.appendChild(el);
+    }
+  }
+  // detalhe da web na dica: quantas ficaram de fora por serem antigas
+  const webLine =
+    w.status === 'ok'
+      ? `☁️ Web: aparecem as sessões ativas ou das últimas ${w.recentH || 12} h${w.old ? ` (${w.old} mais ${w.old === 1 ? 'antiga oculta' : 'antigas ocultas'})` : ''}.`
+      : w.status === 'desativado'
+        ? '☁️ Web: desligada neste PC (CLAWDDESK_WEB=0).'
+        : '☁️ Web: precisa do login do Claude Code no terminal deste PC (claude auth login).';
+  setText($('sh-web'), webLine);
+}
+function toggleSourcesHint() {
+  const h = $('sources-hint');
+  h.hidden = !h.hidden;
+  // endereço deste PC como o celular enxerga (no próprio PC, "localhost" não serve para o outro)
+  const host = location.hostname;
+  setText($('sh-addr'), host && !/^(localhost|127\.|\[?::1)/.test(host) ? host : 'ENDEREÇO');
+  if (snap) renderSources(snap);
+}
+
 function renderTop() {
   const st = awake.status();
   const a = $('awake');
@@ -1150,6 +1216,13 @@ vol.addEventListener('input', () => {
 });
 vol.addEventListener('change', () => sfx.play('tick'));
 $('sim-btn').addEventListener('click', () => sim.toggle());
+$('sources').addEventListener('click', toggleSourcesHint);
+$('sources').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' || e.key === ' ') {
+    e.preventDefault();
+    toggleSourcesHint();
+  }
+});
 $('full').addEventListener('click', () => {
   if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
   else if (document.documentElement.requestFullscreen) document.documentElement.requestFullscreen().catch(() => {});
