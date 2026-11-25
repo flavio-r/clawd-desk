@@ -25,6 +25,28 @@ const colorOf = (x) =>
   !x ? PROJECT_COLORS[0] : (Number.isInteger(x.colorIndex) && PROJECT_COLORS[x.colorIndex]) || projectColor(x.project || x.name || '');
 
 const $ = (id) => document.getElementById(id);
+
+// De onde vem a sessão: sem "origin" = este PC; { kind: 'pc' (outro PC com ClawdDesk) |
+// 'web' (claude.ai/code) | 'remote' (outro PC com Controle Remoto), label }
+function originTag(x) {
+  const o = x && x.origin;
+  if (!o) return '';
+  if (o.kind === 'web') return '☁️ WEB';
+  if (o.kind === 'remote') return '📡 OUTRO PC';
+  return `🖥 ${String(o.label || 'PC').toUpperCase()}`;
+}
+function originName(x) {
+  const o = x && x.origin;
+  if (!o) return '';
+  return o.kind === 'web' ? 'web' : o.kind === 'remote' ? 'outro PC' : o.label || 'outro PC';
+}
+// onde responder um pedido/pergunta dessa sessão
+function whereToAnswer(x) {
+  const o = x && x.origin;
+  if (!o) return 'Responda no PC';
+  if (o.kind === 'pc') return `Responda no ${o.label || 'outro PC'}`;
+  return 'Responda no claude.ai';
+}
 const body = document.body;
 const isTouch = window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
 
@@ -297,22 +319,25 @@ const NOTICE_TTL = { done: 20e3, error: 30e3, question: 90e3 }; // "aguardando" 
 
 function noticeContent(e) {
   const x = e.x;
+  const title = x.origin ? `${x.project} · ${originName(x)}` : x.project;
   if (e.type === 'permission') {
     if (x.question && x.question.source === 'ask') {
-      return { icon: '❓', title: x.project, text: x.question.text, options: x.question.options };
+      return { icon: '❓', title, text: x.question.text, options: x.question.options };
     }
     const what =
       x.tool && !/pergunta|plano/i.test(x.message || '') ? `${x.tool.name}: ${x.tool.target}` : x.message || 'aprovação pendente';
-    return { icon: '✋', title: x.project, text: `Aguardando sua resposta · ${what}` };
+    return { icon: '✋', title, text: `Aguardando sua resposta · ${what}` };
   }
   if (e.type === 'question') {
-    return { icon: '❓', title: `${x.project} · aguardando você`, text: x.question.text, options: x.question.options, hint: 'responda no PC' };
+    return { icon: '❓', title: `${title} · aguardando você`, text: x.question.text, options: x.question.options, hint: whereToAnswer(x).toLowerCase() };
   }
-  if (e.type === 'error') return { icon: '⚠️', title: x.project, text: 'Parou com erro da API · confira a sessão' };
+  if (e.type === 'error') return { icon: '⚠️', title, text: x.origin && x.message ? `Parou: ${x.message}` : 'Parou com erro da API · confira a sessão' };
   const d = x.lastDone || {};
   let text = d.duration ? `Concluiu em ${fmtDuration(d.duration, { seconds: true })}` : 'Concluiu';
   if (d.tools) text += ` · ${d.tools} ${d.tools === 1 ? 'ferramenta' : 'ferramentas'}`;
-  return { icon: '✅', title: x.project, text: `${text} · pronta para o próximo pedido` };
+  if (x.origin && x.recent && x.recent[0] && x.recent[0].verb) text += ` · ${x.recent[0].verb}`;
+  else text += ' · pronta para o próximo pedido';
+  return { icon: '✅', title, text };
 }
 
 function showNotice(e, t) {
@@ -343,7 +368,7 @@ function showNotice(e, t) {
     }
     el.appendChild(box);
   }
-  const item = { key: e.key, type: e.type, el, timer: null, sid: e.x.id, action: null };
+  const item = { key: e.key, type: e.type, el, timer: null, sid: e.x.id, origin: e.x.origin || null, action: null };
   if (e.type === 'permission') {
     const act = document.createElement('div');
     act.className = 'n-actions';
@@ -465,7 +490,7 @@ function syncNoticeActions(t) {
       hint.className = 'n-hint n-err';
       item.act.append(hint);
     } else {
-      hint.textContent = 'Responda no PC';
+      hint.textContent = whereToAnswer({ origin: item.origin });
       item.act.append(hint);
     }
   }
@@ -592,7 +617,7 @@ function renderCore(state, mood, p, s, t) {
     }
   } else if (state === 'thinking') {
     label = p.tool ? 'Trabalhando' : 'Pensando';
-    detail = p.tool ? `${p.tool.icon} ${p.tool.verb} ${p.tool.target}`.trim() : '💭 Pensando…';
+    detail = p.tool ? `${p.tool.icon} ${p.tool.verb} ${p.tool.target}`.trim() : p.origin && p.message ? `💭 ${p.message}` : '💭 Pensando…';
     const parts = [];
     if (p.turnStart) parts.push(fmtDuration(t - p.turnStart, { seconds: true }));
     if (p.toolCount) parts.push(`${p.toolCount} ${p.toolCount === 1 ? 'ferramenta' : 'ferramentas'}`);
@@ -602,6 +627,7 @@ function renderCore(state, mood, p, s, t) {
     detail =
       p.tool && !/pergunta|plano/i.test(p.message || '') ? `${p.tool.icon} ${p.tool.name}: ${p.tool.target}` : p.message || 'Aguardando aprovação';
     meta = `${p.message && p.tool ? p.message + ' · ' : ''}aguardando há ${fmtDuration(t - p.since, { seconds: true })}`;
+    if (p.origin) meta += ` · ${whereToAnswer(p).toLowerCase()}`;
   } else if (state === 'done') {
     const d = p.lastDone || {};
     label = d.error ? 'Parou com erro' : 'Concluído!';
@@ -616,12 +642,12 @@ function renderCore(state, mood, p, s, t) {
   if (q && mood !== 'warning') {
     if (state === 'idle') label = 'Aguardando você';
     detail = `❓ ${q.text}`;
-    meta = `${q.options && q.options.length ? 'opções: ' + q.options.join(' · ') + ' — ' : ''}responda no PC`;
+    meta = `${q.options && q.options.length ? 'opções: ' + q.options.join(' · ') + ' — ' : ''}${whereToAnswer(p).toLowerCase()}`;
   }
   setText($('state-label'), label);
   setText($('state-detail'), detail);
   setText($('state-meta'), meta);
-  setText($('core-project'), p ? `${p.project}${p.model ? ' · ' + p.model : ''}` : 'Claude Code');
+  setText($('core-project'), p ? `${p.origin ? originTag(p) + ' · ' : ''}${p.project}${p.model ? ' · ' + p.model : ''}` : 'Claude Code');
   renderCoreTime(p);
   renderCoreGit(p);
   // o robô do núcleo veste a cor do projeto em destaque
@@ -712,7 +738,7 @@ function renderTimeline(s) {
 function drawTimeline(box, tl, live) {
   const projects = tl ? tl.projects : [];
   const span = tl ? Math.max(1, tl.to - tl.from) : 1;
-  const sig = projects.map((p) => `${p.name}:${p.total}:${p.intervals.length}:${live.has(p.name) ? 1 : 0}`).join('|') + `|${tl ? Math.floor(tl.to / 60000) : 0}`;
+  const sig = projects.map((p) => `${p.name}:${p.total}:${p.intervals.length}:${live.has(p.name) ? 1 : 0}:${(p.hosts || []).join(',')}`).join('|') + `|${tl ? Math.floor(tl.to / 60000) : 0}`;
   if (box.dataset.sig === sig) return;
   box.dataset.sig = sig;
   box.textContent = '';
@@ -735,6 +761,14 @@ function drawTimeline(box, tl, live) {
     const name = document.createElement('span');
     name.className = 'tl-name';
     name.textContent = p.name;
+    if (p.hosts && p.hosts.length) {
+      // projeto (também) trabalhado em outro PC: ícone antes do nome; o nome do PC no "title"
+      const h = document.createElement('span');
+      h.className = 'tl-host';
+      h.textContent = p.remoteOnly ? '🖥 ' : '+🖥 ';
+      name.prepend(h);
+      name.title = `${p.remoteOnly ? 'No' : 'Aqui e no'} ${p.hosts.join(', ')}`;
+    }
     const track = document.createElement('div');
     track.className = 'tl-track';
     for (const [x0, x1] of p.intervals) {
@@ -842,10 +876,30 @@ function renderLimits(u, t) {
   const src = w.source || f.source;
   let note = '';
   if (src === 'simulação') note = 'SIMULAÇÃO';
-  else if (src === 'estimativa') note = w.pct == null ? 'SEM DADOS OFICIAIS' : 'ESTIMADO';
+  else if (src === 'estimativa') note = w.pct == null ? 'SEM DADOS OFICIAIS' : 'SÓ ESTE PC';
   else if (w.extrapolated) note = '≈ ESTIMADO';
   else if (w.updatedAt) note = `OFICIAL · ${fmtDuration(Date.now() - w.updatedAt)}`;
   setText($('limits-note'), note);
+  renderLimitsHint(src === 'estimativa' ? u.oauth : null);
+}
+
+// Quando os limites vêm só dos logs deste computador, diz por quê e como ver a conta toda.
+const LIMITS_HINTS = {
+  'sem-credenciais': 'Só o uso deste PC. Para ver a conta toda (outros PCs, app e web), rode no terminal do PC: <code>claude auth login</code>',
+  'token-expirado': 'Só o uso deste PC: o login do Claude Code no terminal expirou. Abra <code>claude</code> no terminal do PC para renovar.',
+  'nao-autorizado': 'Só o uso deste PC: o login salvo foi recusado. Rode no terminal do PC: <code>claude auth login</code>',
+  disabled: 'Só o uso deste PC: a consulta à conta está desligada (CLAWDDESK_OAUTH=0).',
+  limitado: 'Só o uso deste PC por enquanto: a API de uso pediu uma pausa.',
+  erro: 'Só o uso deste PC por enquanto: sem resposta da API de uso.',
+};
+function renderLimitsHint(status) {
+  const el = $('limits-hint');
+  const html = status ? LIMITS_HINTS[status] || (String(status).startsWith('http-') ? LIMITS_HINTS.erro : '') : '';
+  el.hidden = !html;
+  if (el.dataset.html !== html) {
+    el.dataset.html = html;
+    el.innerHTML = html; // texto fixo daqui de cima (nada vindo do servidor)
+  }
 }
 
 // Uma linha por modelo com limite semanal próprio: "FABLE até 50% ▮▮▯▯▯ 12%"
@@ -928,14 +982,22 @@ function sessionTexts(x, t) {
   let act = 'Aguardando comandos';
   if (x.state === 'thinking') {
     time = x.turnStart ? fmtDuration(t - x.turnStart, { seconds: true }) : '';
-    act = x.tool ? `${x.tool.icon} ${x.tool.verb} ${x.tool.target}`.trim() : '💭 Pensando…';
+    act = x.tool ? `${x.tool.icon} ${x.tool.verb} ${x.tool.target}`.trim() : x.origin && x.message ? `💭 ${x.message}` : '💭 Pensando…';
   } else if (x.state === 'permission') {
     time = `há ${fmtDuration(t - x.since, { seconds: true })}`;
     act = x.tool && !/pergunta|plano/i.test(x.message || '') ? `✋ ${x.tool.name}: ${x.tool.target}` : `✋ ${x.message || 'Aguardando aprovação'}`;
   } else if (x.state === 'done') {
     const d = x.lastDone || {};
     time = 'agora';
-    act = d.error ? '⚠️ Parou com erro da API' : `✅ Concluído${d.duration ? ' em ' + fmtDuration(d.duration, { seconds: true }) : ''}`;
+    act = d.error ? `⚠️ ${x.origin && x.message ? x.message : 'Parou com erro da API'}` : `✅ Concluído${d.duration ? ' em ' + fmtDuration(d.duration, { seconds: true }) : ''}`;
+  } else if (x.origin && x.origin.online === false) {
+    // outro PC desligado ou sem rede
+    act = `🔌 ${x.message || 'desconectado'}`;
+  } else if (x.origin && x.origin.kind !== 'pc') {
+    // web / Controle Remoto: o resumo vem do claude.ai
+    const d = x.lastDone;
+    time = `há ${fmtDuration(t - ((d && d.at) || x.lastEventAt))}`;
+    act = x.message ? `${d && d.error ? '⚠️' : '✓'} ${x.message}` : 'Aguardando comandos';
   } else {
     const d = x.lastDone;
     time = d ? `há ${fmtDuration(t - d.at)}` : '';
@@ -973,7 +1035,7 @@ function renderSessions(s, p, t) {
       const card = document.createElement('article');
       card.className = 's-card';
       card.innerHTML =
-        '<div class="s-head"><span class="s-bot"></span><span class="s-title"><span class="s-name"></span><span class="s-git"></span></span>' +
+        '<div class="s-head"><span class="s-bot"></span><span class="s-title"><span class="s-origin" hidden></span><span class="s-name"></span><span class="s-git"></span></span>' +
         '<span class="s-badge"></span><span class="s-time"></span></div>' +
         '<div class="s-act"></div><div class="s-prompt"></div>' +
         '<div class="s-meta"><span class="s-diff"></span><span class="s-sep s-diff-sep">│</span><span class="s-work"></span>' +
@@ -989,6 +1051,12 @@ function renderSessions(s, p, t) {
     card.dataset.state = x.state;
     card.dataset.primary = p && x.id === p.id && n > 1 ? '1' : '0';
     setText(card.querySelector('.s-name'), x.name ? `${x.project} · ${x.name}` : x.project);
+    const og = card.querySelector('.s-origin');
+    const tag = originTag(x);
+    setText(og, tag);
+    og.hidden = !tag;
+    og.dataset.kind = x.origin ? x.origin.kind : '';
+    og.dataset.online = x.origin && x.origin.online === false ? '0' : '1';
     // mini-robô na cor do projeto
     const col = colorOf(x);
     const botBox = card.querySelector('.s-bot');
@@ -1000,7 +1068,7 @@ function renderSessions(s, p, t) {
     // git: branch + PR no título; arquivos e linhas na linha de detalhes
     const g = x.git;
     setText(card.querySelector('.s-git'), g || x.pr ? [g ? `🌿 ${g.branch}` : '', x.pr ? `PR #${x.pr.number}` : ''].filter(Boolean).join(' · ') : '');
-    const diff = g ? (g.files ? `±${g.files} arq. +${g.added} −${g.removed}` : 'sem alterações') : '';
+    const diff = g && g.files != null ? (g.files ? `±${g.files} arq. +${g.added} −${g.removed}` : 'sem alterações') : '';
     setText(card.querySelector('.s-diff'), diff);
     card.querySelector('.s-diff').hidden = !diff;
     card.querySelector('.s-diff-sep').hidden = !diff;
@@ -1011,7 +1079,8 @@ function renderSessions(s, p, t) {
     setText(card.querySelector('.s-prompt'), x.prompt ? `› ${x.prompt}` : '');
     setText(card.querySelector('.s-model'), x.model || 'Claude');
     const wk = x.work && (x.work.project || x.work.session);
-    setText(card.querySelector('.s-work'), wk ? `⏱ ${fmtWork(wk.today)} hoje · ${fmtWork(wk.total)} total` : `${x.toolCount || 0} ferr.`);
+    const where = x.origin && x.origin.kind === 'web' ? '☁️ claude.ai/code' : x.origin && x.origin.kind === 'remote' ? '📡 Controle Remoto' : `${x.toolCount || 0} ferr.`;
+    setText(card.querySelector('.s-work'), wk ? `⏱ ${fmtWork(wk.today)} hoje · ${fmtWork(wk.total)} total` : where);
     const c = x.context && x.context.pct != null ? Math.max(0, Math.min(100, x.context.pct)) : null;
     const bar = card.querySelector('.s-ctx i');
     const bw = `${c == null ? 0 : c.toFixed(1)}%`;

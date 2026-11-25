@@ -19,6 +19,7 @@ const USAGE_BYTES = Buffer.from('"usage":');
 const TYPE_USER = Buffer.from('"type":"user"');
 const TOOL_USE_ID = Buffer.from('"tool_use_id"');
 const PR_LINK = Buffer.from('{"type":"pr-link"');
+const BRIDGE = Buffer.from('{"type":"bridge-session"'); // sessão deste PC que também aparece no claude.ai
 const KEEP_INTERVALS_MS = 2 * DAY;
 const MAX_TURN_MS = 4 * HOUR; // um turno "esquecido" aberto não infla o total
 
@@ -59,6 +60,7 @@ export class UsageTracker extends EventEmitter {
     this.work = new Map(); // sessionId -> { project, file, days: Map(dia -> ms), turnStart, turnEnd, first }
     this.fullScanned = new Set(); // projetos cujos logs antigos já foram lidos
     this.prs = new Map(); // sessionId -> { number, url, repo, at }
+    this.bridgeIds = new Set(); // ids no claude.ai (sem prefixo) de sessões que rodaram neste PC
     this.timelineCache = null;
     this.projectCache = new Map();
     this.calAt = {};
@@ -144,6 +146,7 @@ export class UsageTracker extends EventEmitter {
     const o = this.oauth;
     if (o.inflight) return;
     o.inflight = true;
+    const before = o.status;
     const now = Date.now();
     try {
       if (!o.token || (o.tokenExp && o.tokenExp < now + MIN)) {
@@ -201,6 +204,11 @@ export class UsageTracker extends EventEmitter {
       o.nextAt = Date.now() + 5 * MIN;
     } finally {
       o.inflight = false;
+      // avisa a tela e o terminal quando o login muda (ex.: "deslogado" → "ok" depois do claude auth login)
+      if (o.status !== before) {
+        this.emit('oauth', o.status, before);
+        this.emit('change');
+      }
     }
   }
 
@@ -353,6 +361,7 @@ export class UsageTracker extends EventEmitter {
           if (nextUsage !== -1 && nextUsage < idx) this.ingestLine(buf.toString('utf8', start, idx), file);
           // link de PR aberto pela sessão
           else if (buf.subarray(start, start + PR_LINK.length).equals(PR_LINK)) this.prLine(buf.toString('utf8', start, idx));
+          else if (buf.subarray(start, start + BRIDGE.length).equals(BRIDGE)) this.bridgeLine(buf.toString('utf8', start, idx));
           // pedido do usuário? ("type":"user" logo no começo da linha e sem tool_result)
           else if (
             buf.subarray(start, Math.min(idx, start + 400)).indexOf(TYPE_USER) !== -1 &&
@@ -401,6 +410,17 @@ export class UsageTracker extends EventEmitter {
     try {
       const o = JSON.parse(line);
       if (o.sessionId && o.prUrl) this.prs.set(o.sessionId, { number: o.prNumber, url: o.prUrl, repo: o.prRepository, at: Date.parse(o.timestamp) || 0 });
+    } catch {
+      /* linha incompleta */
+    }
+  }
+
+  // "bridge-session": a sessão local foi espelhada no claude.ai (Controle Remoto / app desktop).
+  // Guardamos o id de lá para não mostrar a mesma sessão duas vezes (aqui e como "sessão da web").
+  bridgeLine(line) {
+    try {
+      const o = JSON.parse(line);
+      if (o.bridgeSessionId) this.bridgeIds.add(String(o.bridgeSessionId).replace(/^(session|cse)_/, ''));
     } catch {
       /* linha incompleta */
     }

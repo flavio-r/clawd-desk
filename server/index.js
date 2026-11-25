@@ -17,6 +17,9 @@ import { GitTracker } from './git.js';
 import { ColorRegistry } from './colors.js';
 import { FxRate } from './fx.js';
 import { describeTool } from './state.js';
+import { LocalSessions } from './localsessions.js';
+import { WebSessions } from './websessions.js';
+import { SatelliteHub, SatelliteLink } from './satellite.js';
 
 const usage = new UsageTracker();
 const store = new SessionStore(usage);
@@ -27,6 +30,74 @@ store.git = gitTracker;
 const colors = new ColorRegistry();
 const fx = new FxRate();
 store.colors = colors;
+
+const logLine = (msg) => {
+  if (!cfg.QUIET) console.log(`  [${new Date().toTimeString().slice(0, 8)}] ${msg}`);
+};
+
+// sessões abertas neste PC (fichas do Claude Code em ~/.claude/sessions)
+const localSessions = new LocalSessions();
+localSessions.on('change', () => store.syncLocal(localSessions));
+
+// outros computadores: este PC como principal (recebe) e/ou como satélite (envia para outro)
+const hub = new SatelliteHub(approvals);
+const link = new SatelliteLink({
+  snapshotPart: () => ({
+    sessions: store.list().slice(0, 12),
+    timeline: usage.timelineView(),
+    approvals: approvals.view().open,
+    bridgeIds: [...localSessions.bridgeIds(), ...usage.bridgeIds],
+  }),
+  // Permitir/Negar feito no celular do PC principal para um pedido deste PC
+  onDecision: (id, decision) => {
+    const item = approvals.resolve(id, decision, 'celular');
+    if (!item) return { ok: false, status: 410, error: 'esse pedido já foi respondido ou expirou' };
+    store.remoteDecision(item.sessionId, decision, item.tool);
+    logLine(`📱 ${item.project}: ${decision === 'allow' ? 'PERMITIDO' : 'NEGADO'} pelo celular (via ClawdDesk principal) · ${item.tool.name} ${item.tool.target}`);
+    return { ok: true };
+  },
+});
+
+// sessões da web (claude.ai/code) e de outros PCs com Controle Remoto, pela conta OAuth
+const web = new WebSessions(usage, () => new Set([...localSessions.bridgeIds(), ...usage.bridgeIds, ...hub.bridgeIds()]));
+
+// ordem na tela: quem precisa de você > trabalhando > concluído > parado; depois o mais recente
+const PRIORITY = { permission: 3, thinking: 2, done: 1, idle: 0 };
+const byPriority = (a, b) => (PRIORITY[b.state] || 0) - (PRIORITY[a.state] || 0) || b.lastEventAt - a.lastEventAt;
+
+// linha do tempo: projetos deste PC + dos outros PCs (mesmo nome = mesma linha)
+function mergedTimeline() {
+  const tl = usage.timelineView();
+  const extra = hub.timelineProjects();
+  if (!extra.length) return tl;
+  const now = Date.now();
+  const byName = new Map(tl.projects.map((p) => [p.name, { ...p, intervals: p.intervals.slice(), hosts: [] }]));
+  for (const p of extra) {
+    const ivs = p.intervals.filter(([, b]) => b > tl.dayStart).map(([a, b]) => [Math.max(a, tl.dayStart), Math.min(b, now)]);
+    if (!ivs.length) continue;
+    const q = byName.get(p.name);
+    if (q) {
+      q.intervals.push(...ivs);
+      if (!q.hosts.includes(p.host)) q.hosts.push(p.host);
+    } else byName.set(p.name, { key: p.key, name: p.name, total: 0, intervals: ivs, hosts: [p.host], remoteOnly: true });
+  }
+  const projects = [];
+  for (const p of byName.values()) {
+    p.intervals.sort((x, y) => x[0] - y[0]);
+    const merged = [];
+    for (const iv of p.intervals) {
+      const last = merged[merged.length - 1];
+      if (last && iv[0] <= last[1]) last[1] = Math.max(last[1], iv[1]);
+      else merged.push([iv[0], iv[1]]);
+    }
+    p.intervals = merged;
+    p.total = merged.reduce((t, [a, b]) => t + (b - a), 0);
+    if (p.total >= 120e3) projects.push(p);
+  }
+  projects.sort((a, b) => b.total - a.total);
+  const first = projects.length ? Math.min(...projects.map((p) => p.intervals[0][0])) : now;
+  return { ...tl, from: Math.floor(first / 3600e3) * 3600e3, to: now, projects: projects.slice(0, 10) };
+}
 
 // Versão da interface = hash dos arquivos de public/. Quando muda (arquivo editado ou servidor
 // reiniciado com código novo), os celulares conectados recarregam sozinhos.
@@ -56,19 +127,22 @@ function withColors(tl) {
 }
 
 function snapshot() {
-  const sessions = store.list();
+  const withColor = (x) => (x.origin ? { ...x, colorIndex: colors.get(x.project) } : x);
+  const sessions = [...store.list(), ...hub.sessions().map(withColor), ...web.view().map(withColor)].sort(byPriority);
+  const ap = approvals.view();
   const base = {
     serverTime: Date.now(),
     primary: sessions[0] || null,
-    sessions: sessions.slice(0, 8),
+    sessions: sessions.slice(0, 10),
     usage: usage.view(),
     hooks: store.hooks,
     statusline: store.statusline,
     sim: { active: false },
     version: uiVersion,
-    approvals: approvals.view(),
-    timeline: withColors(usage.timelineView()),
+    approvals: { ...ap, open: [...ap.open, ...hub.approvalsView()] },
+    timeline: withColors(mergedTimeline()),
     fx: fx.view(),
+    remote: { machine: cfg.MACHINE_NAME, web: web.info(), satellites: hub.view(), link: link.view() },
   };
   return sim.apply(base);
 }
@@ -120,8 +194,17 @@ app.post('/api/permission/request', localOnly, express.json({ limit: '5mb' }), (
   );
 });
 
-app.post('/api/permission/decision', express.json({ limit: '10kb' }), (req, res) => {
+app.post('/api/permission/decision', express.json({ limit: '10kb' }), async (req, res) => {
   const { id, decision, token } = req.body || {};
+  // pedido de OUTRO PC (modo satélite): repassa a resposta para ele
+  if (typeof id === 'string' && id.startsWith('sat:')) {
+    if (!approvals.verify(token)) return res.status(401).json({ ok: false, error: 'aparelho não pareado' });
+    if (decision !== 'allow' && decision !== 'deny') return res.status(400).json({ ok: false, error: 'decisão inválida' });
+    const r = await hub.decide(id, decision);
+    if (!r.ok) return res.status(r.status).json({ ok: false, error: r.error });
+    if (r.item) logLine(`📱 ${r.item.project} (${r.host}): ${decision === 'allow' ? 'PERMITIDO' : 'NEGADO'} pelo celular · ${r.item.tool.name} ${r.item.tool.target}`);
+    return res.json({ ok: true });
+  }
   if (typeof id === 'string' && id.startsWith('sim-')) {
     if (!approvals.verify(token)) return res.status(401).json({ ok: false, error: 'aparelho não pareado' });
     const ok = sim.remoteDecide(id, decision);
@@ -234,7 +317,15 @@ wss.on('connection', (ws, req) => {
       ws.info.paired = !!approvals.verify(msg.token);
       ws.send(JSON.stringify({ type: 'auth', paired: ws.info.paired }));
       if (changed) logClient(ws, 'conectado');
+      hub.broadcastStatus(phonesOnline());
     }
+    // outro computador (modo satélite)
+    else if (msg && msg.type === 'satellite-hello') {
+      clearTimeout(ws.helloTimer);
+      hub.hello(ws, msg);
+      if (ws.sat) hub.broadcastStatus(phonesOnline());
+    } else if (msg && msg.type === 'satellite-state' && ws.sat) hub.state(ws, msg);
+    else if (msg && msg.type === 'decision-result' && ws.sat) hub.result(msg);
   });
   // interfaces antigas não mandam "hello": depois de 6 s sem resposta, avisa que precisa recarregar
   ws.helloTimer = setTimeout(() => {
@@ -242,14 +333,16 @@ wss.on('connection', (ws, req) => {
   }, 6000);
   ws.on('close', () => {
     clearTimeout(ws.helloTimer);
+    if (ws.sat) return hub.closed(ws);
     if (ws.info.logged) logClient(ws, 'desconectado');
+    hub.broadcastStatus(phonesOnline());
   });
   ws.send(JSON.stringify({ type: 'snapshot', data: snapshot() }));
 });
 
 app.get('/api/clients', (req, res) =>
   res.json(
-    [...wss.clients].map((c) => ({
+    [...wss.clients].filter((c) => !c.sat).map((c) => ({
       ip: c.info.ip,
       device: c.info.device,
       version: c.info.version,
@@ -276,16 +369,53 @@ function broadcast() {
   pending = setTimeout(() => {
     pending = null;
     if (!wss.clients.size) return;
+    const viewers = [...wss.clients].filter((ws) => ws.readyState === 1 && !ws.sat);
+    if (!viewers.length) return;
     const msg = JSON.stringify({ type: 'snapshot', data: snapshot() });
-    for (const ws of wss.clients) if (ws.readyState === 1) ws.send(msg);
+    for (const ws of viewers) ws.send(msg);
   }, 80);
 }
-store.on('change', broadcast);
-approvals.on('change', broadcast);
-gitTracker.on('change', broadcast);
+// há celular pareado olhando? (satélites não contam)
+const phonesOnline = () => [...wss.clients].some((c) => c.readyState === 1 && !c.sat && c.info && c.info.paired);
+const pushToHub = () => link.push();
+for (const src of [store, approvals, gitTracker, usage]) {
+  src.on('change', broadcast);
+  src.on('change', pushToHub);
+}
 fx.on('change', broadcast);
-approvals.onlineCheck = () => [...wss.clients].some((c) => c.readyState === 1 && c.info && c.info.paired);
-usage.on('change', broadcast);
+web.on('change', broadcast);
+hub.on('change', broadcast);
+link.on('change', broadcast);
+hub.on('log', logLine);
+link.on('log', logLine);
+web.isWatched = () => [...wss.clients].some((c) => c.readyState === 1 && !c.sat);
+web.on('status', (st, before) => {
+  const msg = {
+    ok: '☁  Sessões da web (claude.ai/code) conectadas',
+    'sem-acesso': '⚠  A conta não permite listar as sessões da web; elas não vão aparecer',
+    'nao-autorizado': '⚠  Login recusado ao listar as sessões da web; rode: claude auth login',
+  }[st];
+  if (msg) logLine(msg);
+  else if ((st === 'erro' || String(st).startsWith('http-')) && before === 'ok') logLine(`⚠  Sem resposta da lista de sessões da web (${st}); tento de novo em instantes`);
+});
+// pode esperar a resposta do celular? (celular pareado aqui ou no ClawdDesk principal)
+approvals.onlineCheck = () => phonesOnline() || link.phonesOnline;
+setInterval(() => hub.broadcastStatus(phonesOnline()), 15e3).unref();
+// Mudou o acesso ao uso da conta (API do Claude.ai)? Explica no terminal o que isso significa.
+usage.on('oauth', (status) => {
+  if (cfg.QUIET) return;
+  const y = (s) => `\x1b[33m${s}\x1b[0m`;
+  const msg = {
+    ok: '🔑 Uso da conta conectado: limites oficiais (todos os seus PCs, app e web)',
+    'sem-credenciais': `${y('⚠')}  O Claude Code do terminal não está logado → limites estimados só com este PC. Para ver a conta toda, rode: claude auth login`,
+    'token-expirado': `${y('⚠')}  O login do Claude Code no terminal expirou → limites estimados só com este PC. Abra "claude" no terminal para renovar`,
+    'nao-autorizado': `${y('⚠')}  A Anthropic recusou o login salvo → limites estimados só com este PC. Rode de novo: claude auth login`,
+    limitado: '⏳ API de uso pediu uma pausa; tento de novo em alguns minutos',
+  }[status];
+  if (msg) console.log(`  [${new Date().toLocaleTimeString('pt-BR')}] ${msg}`);
+  else if (status === 'erro' || String(status).startsWith('http-'))
+    console.log(`  [${new Date().toLocaleTimeString('pt-BR')}] ${y('⚠')}  Sem resposta da API de uso (${status}); tento de novo em 5 min`);
+});
 sim.on('change', broadcast);
 setInterval(broadcast, 30e3).unref(); // mantém relógios sincronizados
 
@@ -354,8 +484,10 @@ server.listen(cfg.PORT, cfg.HOST, async () => {
       ? `  🔑 Limites 5h/semanal: statusLine + API de uso do Claude.ai ${d('(CLAWDDESK_OAUTH=0 desativa)')}`
       : `  🔑 Limites 5h/semanal: apenas statusLine ${d('(OAuth desativado)')}`
   );
+  if (cfg.WEB_ENABLED) console.log(`  ☁  Sessões da web e de outros PCs (claude.ai): ligadas ${d('(CLAWDDESK_WEB=0 desativa)')}`);
+  if (link.enabled) console.log(`  🛰  Este PC (${b(cfg.MACHINE_NAME)}) envia as sessões para o ClawdDesk principal em ${c(link.conf.url)} ${d('(npm run unlink desfaz)')}`);
   console.log(
-    `  🔐 Código para parear o celular (aprovar pedidos por ele): ${b(approvals.codeFormatted)}` +
+    `  🔐 Código para parear o celular ou outro PC: ${b(approvals.codeFormatted)}` +
       d(approvals.devices.length ? `  · ${approvals.devices.length} aparelho(s) já pareado(s)` : '')
   );
   // passo a passo para quem está configurando pela primeira vez (npm run setup)
@@ -376,6 +508,9 @@ server.listen(cfg.PORT, cfg.HOST, async () => {
   console.log(`  ${d('Ctrl+C para encerrar.')}\n`);
   usage.start();
   fx.start();
+  localSessions.start();
+  web.start();
+  link.start();
 });
 
 const shutdown = () => {

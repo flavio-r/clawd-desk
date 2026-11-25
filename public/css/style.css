@@ -502,6 +502,17 @@ body[data-state='offline'] .bigclock-box {
 .pace[data-level='1'] { color: var(--amber); }
 .pace[data-level='2'] { color: var(--red); animation: blink 1.6s ease-in-out infinite; }
 
+/* "só este PC": explica por que os limites não são os da conta toda e como resolver */
+.limits-hint {
+  font-family: var(--mono);
+  font-size: max(10px, calc(var(--u) * 2.3));
+  line-height: 1.35;
+  color: var(--amber);
+  border-left: 2px solid var(--amber);
+  padding-left: 0.7em;
+}
+.limits-hint code { color: #fff; font-weight: 700; white-space: nowrap; }
+
 /* ---------------------------------------------------------------- sessões */
 .sessions { display: flex; flex-direction: column; }
 .session-list { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: calc(var(--u) * 0.8); overflow: hidden; }
@@ -541,6 +552,24 @@ body[data-state='offline'] .bigclock-box {
   text-overflow: ellipsis;
 }
 .s-diff { color: var(--git); }
+/* de onde vem a sessão: outro PC, web (claude.ai/code) ou Controle Remoto */
+.s-origin {
+  flex: none;
+  align-self: center;
+  font-family: var(--mono);
+  font-size: max(8px, calc(var(--u) * 1.9));
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  padding: 0.1em 0.5em;
+  border-radius: 3px;
+  border: 1px solid currentColor;
+  color: var(--purple);
+  white-space: nowrap;
+}
+.s-origin[data-kind='web'] { color: var(--cyan-soft); }
+.s-origin[data-kind='remote'] { color: var(--amber); }
+.s-origin[data-online='0'] { opacity: 0.5; }
+.tl-host { font-family: var(--mono); font-size: 0.82em; font-weight: 400; color: var(--purple); }
 .s-name { font-size: max(12px, calc(var(--u) * 3.3)); font-weight: 700; letter-spacing: 0.03em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .s-card[data-primary='1'] .s-name::before { content: '▶ '; color: var(--cyan); font-size: 0.75em; }
 .s-badge {

@@ -11,6 +11,8 @@
     "restart": "node scripts/restart.js",
     "setup-hooks": "node scripts/setup-hooks.js",
     "remove-hooks": "node scripts/setup-hooks.js --uninstall",
+    "link": "node scripts/link.js",
+    "unlink": "node scripts/link.js --remove",
     "demo": "node scripts/demo.js",
     "icons": "node scripts/gen-icons.js"
   },

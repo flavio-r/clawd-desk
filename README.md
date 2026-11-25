@@ -105,6 +105,7 @@ sozinho — se ele estiver com a página aberta, nem precisa fazer nada.
 - [Instalação](#instalação)
 - [Conectar o celular](#conectar-o-celular)
 - [Aprovar pedidos pelo celular](#aprovar-pedidos-pelo-celular)
+- [Outros computadores](#outros-computadores)
 - [Comandos](#comandos)
 - [De onde vêm os números](#de-onde-vêm-os-números)
 - [Configuração](#configuração)
@@ -124,9 +125,22 @@ histórico dos últimos passos. O anel mostra o uso de contexto. Cada projeto te
 o robô veste a cor do projeto em destaque.
 
 ### Todas as sessões abertas
-Um cartão por sessão do Claude Code: projeto, estado, ferramenta atual, **git** (branch, PR,
+Um cartão por sessão do Claude Code: projeto, título, estado, ferramenta atual, **git** (branch, PR,
 arquivos e linhas alteradas), **tempo trabalhado** hoje e no total do projeto, contexto, custo
 equivalente em **dólar e em reais** e modelo.
+
+### 🖥 ☁ Outros computadores e sessões da web
+Além das sessões deste PC, a tela mostra:
+- **☁ WEB:** sessões do Claude Code na nuvem (claude.ai/code, app do celular), lidas pela sua conta.
+- **📡 OUTRO PC:** sessões de outros computadores com o **Controle Remoto** ligado.
+- **🖥 NOME-DO-PC:** sessões de outro computador que também roda o ClawdDesk ligado a este
+  ([modo satélite](#outros-computadores)), com todos os detalhes. Dá para **aprovar pedidos** dele
+  pelo mesmo celular.
+
+Cada cartão mostra uma etiqueta com a origem. A mesma sessão nunca aparece duas vezes, mesmo com o
+Controle Remoto ligado.
+
+<img src="docs/screenshots/sessoes-origem.png" alt="Painel de sessões com uma sessão deste PC, uma do Notebook (modo satélite) e uma da web" width="620">
 
 ### Limites de uso da sua conta
 Janela de 5 horas, limite **semanal**, limites **por modelo** (ex.: Fable "até 50% da semana") e uma
@@ -193,7 +207,8 @@ A escolha fica salva no aparelho.
   hooks (eventos)  ──────────────▶│  ClawdDesk (Node.js, :3456)  │    │  página web (PWA)      │
   statusLine (contexto, limites) ▶│  · estado das sessões        │◀══▶│  WebSocket em tempo    │
   logs ~/.claude/projects ───────▶│  · limites, tempo, git, custo│    │  real pela rede Wi-Fi  │
-  API de uso do Claude.ai ───────▶│  · aprovações pelo celular   │    └────────────────────────┘
+  API do Claude.ai (uso, sessões)▶│  · aprovações pelo celular   │    └────────────────────────┘
+  outros PCs (modo satélite) ════▶│  · sessões da web e outros PC│
                                   └──────────────────────────────┘
 ```
 
@@ -254,7 +269,7 @@ O `npm start` mostra no terminal:
   No celular:  http://192.168.0.10:3456  (en0)
   [QR Code]
   ✅ Hooks do Claude Code instalados em ~/.claude/settings.json
-  🔐 Código para parear o celular (aprovar pedidos por ele): 482 913
+  🔐 Código para parear o celular ou outro PC: 482 913
 ```
 
 ### O que o `setup-hooks` faz no seu `settings.json`
@@ -322,6 +337,38 @@ Detalhes:
 
 ---
 
+## Outros computadores
+
+Usa o Claude Code em mais de um computador? Deixe tudo na mesma tela:
+
+- **Sessões na web (claude.ai/code) e de PCs com Controle Remoto:** aparecem sozinhas, sem
+  configurar nada. Só é preciso o Claude Code do terminal estar logado neste PC (`claude auth login`).
+  Mostra as sessões com atividade nas últimas 12 horas, mais as que estão trabalhando ou esperando
+  você.
+- **Outro computador com todos os detalhes (modo satélite):** instale o ClawdDesk nele também (o
+  mesmo [passo a passo](#-comece-aqui-passo-a-passo)) e ligue-o a este:
+
+  1. No computador **principal** (o do celular), veja no terminal o endereço ("No celular:
+     `http://…`") e o **código de pareamento**.
+  2. No **outro** computador, na pasta do ClawdDesk:
+     ```bash
+     npm run link -- 192.168.0.10 123456
+     ```
+     (troque pelo endereço e pelo código do principal; sem os dois, o comando pergunta)
+  3. Reinicie o ClawdDesk do outro computador (`npm run restart`).
+
+  As sessões dele aparecem no principal com a etiqueta 🖥 e o nome do computador, entram na linha
+  do tempo (o mesmo projeto nos dois PCs vira uma linha só) e os pedidos de permissão dele podem ser
+  aprovados pelo celular. Se o outro PC desligar, as sessões dele ficam marcadas como desconectadas
+  e somem em 2 minutos. Para desfazer: `npm run unlink` no outro computador.
+
+  O nome mostrado é o do computador; para trocar: `CLAWDDESK_NAME="Notebook" npm start`.
+
+> Conversas comuns no claude.ai ou no app (fora do Claude Code) não são sessões de código e não
+> aparecem na lista, mas contam nos limites de uso.
+
+---
+
 ## Comandos
 
 | Comando | O que faz |
@@ -331,6 +378,8 @@ Detalhes:
 | `npm run restart` | Encerra o ClawdDesk que estiver rodando (só ele) e sobe a versão atual |
 | `npm run setup-hooks` | Instala/atualiza hooks e statusLine no `~/.claude/settings.json` (com backup) |
 | `npm run remove-hooks` | Remove tudo e restaura seu statusLine original |
+| `npm run link -- <endereço> <código>` | Liga este PC a um ClawdDesk principal ([modo satélite](#outros-computadores)) |
+| `npm run unlink` | Desfaz o `link`: este PC para de enviar as sessões |
 | `npm run demo` | Demonstração automática de todos os estados (`npm run demo -- permission` para um só) |
 | `npm run icons` | Regera os ícones do PWA a partir da arte do robô |
 
@@ -359,13 +408,18 @@ Opções do `setup-hooks`: `--dry-run`, `--minimal` (só os 5 eventos básicos),
 | **Limites por modelo e ritmo** | API de uso (`limits`, `weekly_scoped_shares`); o ritmo é uma projeção do % usado em relação ao tempo da semana |
 | **Contexto** | statusLine, ou a última resposta no transcript da sessão |
 | **Tempo trabalhado** | Logs `~/.claude/projects`: soma de cada turno, do pedido até a última resposta (o tempo esperando você não conta; cada turno conta no máximo 4 h) |
+| **Sessões abertas** | Hooks do Claude Code e as fichas que ele mantém em `~/.claude/sessions` (título, pasta, ocupada ou livre). Com isso, as sessões aparecem mesmo antes do primeiro evento |
+| **Sessões da web e de outros PCs** | Lista de sessões da sua conta (`/v1/code/sessions`, a mesma que o Claude Code usa para "teleportar" sessões), com o token OAuth. Só leitura |
 | **Git** | `git status` e `git diff` na pasta da sessão (só leitura); PR pelo registro `pr-link` dos logs |
 | **Custo** | Tokens dos logs × preço público da API — é um **custo equivalente** (no Pro/Max você não paga por token). Em reais pela cotação do dia (AwesomeAPI; reserva open.er-api.com) |
 
 **Sobre o token OAuth:** é lido do Keychain do macOS (`Claude Code-credentials`) ou de
 `~/.claude/.credentials.json`, usado **só** para consultar `api.anthropic.com` e **nunca** enviado ao
-celular nem renovado pelo ClawdDesk. Se ele vencer (o Claude Code renova ao ser aberto no terminal),
-as barras seguem por estimativa. O endpoint de uso não é documentado oficialmente e pode mudar.
+celular nem renovado pelo ClawdDesk. Se ele não existir (o Claude Code do terminal não está logado,
+como acontece quando se usa só o app desktop) ou vencer (o Claude Code renova ao ser aberto no
+terminal), as barras seguem por estimativa **só com o uso deste computador**: a tela mostra
+"SÓ ESTE PC" e explica como resolver (`claude auth login`). O endpoint de uso não é documentado
+oficialmente e pode mudar.
 Para desligar essa consulta: `CLAWDDESK_OAUTH=0 npm start`.
 
 ---
@@ -384,6 +438,11 @@ Variáveis de ambiente (ex.: `CLAWDDESK_PORT=3457 npm start`):
 | `CLAWDDESK_CONTEXT_WINDOW` | auto | Força o tamanho da janela de contexto (tokens) |
 | `CLAWDDESK_APPROVAL_WAIT_S` | `110` | Quanto tempo o celular pareado pode responder um pedido de permissão |
 | `CLAWDDESK_APPROVAL_WAIT_DESKTOP_S` | `110` | O mesmo, para sessões do app desktop (`0` desliga) |
+| `CLAWDDESK_WEB` | `1` | `0` não mostra as sessões da web e de outros PCs com Controle Remoto |
+| `CLAWDDESK_WEB_RECENT_H` | `12` | Mostra as sessões da web com atividade nas últimas N horas |
+| `CLAWDDESK_WEB_POLL_S` | `30` | Intervalo da consulta das sessões da web (mín. 15 s; 5 min com a tela fechada) |
+| `CLAWDDESK_NAME` | nome do PC | Nome deste computador na tela do ClawdDesk principal (modo satélite) |
+| `CLAWDDESK_DATA_DIR` | `./data` | Pasta dos dados locais (pareamento, vínculo, cores…) |
 | `CLAWDDESK_QUIET` | `0` | `1` silencia o log do terminal |
 | `CLAUDE_CONFIG_DIR` | `~/.claude` | Pasta de configuração do Claude Code |
 
@@ -391,8 +450,11 @@ Variáveis de ambiente (ex.: `CLAWDDESK_PORT=3457 npm start`):
 
 ## Segurança e privacidade
 
-- Nenhum dado sai do seu computador, exceto: a consulta opcional de uso em `api.anthropic.com` e a
-  cotação do dólar (que só pede "USD-BRL").
+- Nenhum dado sai do seu computador, exceto: as consultas opcionais de uso e da lista de sessões em
+  `api.anthropic.com`, a cotação do dólar (que só pede "USD-BRL") e, no modo satélite, as sessões
+  enviadas ao ClawdDesk principal **pela rede local**.
+- Um computador só entra no modo satélite com o código de pareamento do principal; o principal guarda
+  só o hash do token (em `data/paired.json`) e o outro PC guarda o token em `data/hub.json`.
 - `POST /api/event`, `/api/statusline` e `/api/permission/request` só aceitam chamadas do próprio PC.
 - Responder pedidos de permissão exige pareamento (código de 6 dígitos, limite de tentativas).
 - O painel em `:3456` é visível para quem estiver na mesma rede e mostra nomes de projetos, pedidos e
@@ -417,8 +479,22 @@ Depois, apague a pasta do projeto. Seu `settings.json` volta ao que era (com bac
   o `node` no firewall do macOS (Ajustes → Rede → Firewall).
 - **A tela não reage ao Claude:** rodou `npm run setup-hooks` e reiniciou o Claude Code? Sem hooks, a
   tela mostra "no PC: npm run setup-hooks".
-- **Barras 5h/Semana com "—":** ainda não chegou leitura oficial. Use o Claude Code no terminal ou faça
-  `/login` nele com uma conta de assinatura.
+- **Limites com "SÓ ESTE PC" (ou barras com "—"):** o ClawdDesk não conseguiu ler o uso da sua
+  conta e está estimando só com os registros deste computador. Isso acontece quando o Claude Code
+  do **terminal** não está logado. É comum para quem usa só o app desktop, porque ele faz o login
+  por conta própria. Resolva com:
+  ```bash
+  claude auth login
+  ```
+  Em até 1 minuto, os limites passam a ser os oficiais da conta (outros computadores, app e web).
+  Se o login expirar depois, basta abrir `claude` no terminal uma vez.
+- **As sessões da web não aparecem:** elas usam o mesmo login dos limites (`claude auth login`, veja o
+  item acima). Só aparecem as que tiveram atividade nas últimas 12 horas, ou que estão trabalhando ou
+  esperando você (mude com `CLAWDDESK_WEB_RECENT_H=48 npm start`).
+- **O outro computador não conecta (modo satélite):** os dois precisam estar no mesmo Wi-Fi, com o
+  ClawdDesk aberto no principal. O terminal do outro PC diz se não conseguiu falar com o principal. Se
+  o principal pedir para liberar o `node` no firewall, clique em **Permitir**. O código de pareamento
+  muda quando o principal reinicia, mas um PC já ligado continua funcionando.
 - **"A porta 3456 já está em uso":** já há um ClawdDesk rodando — use `npm run restart`.
 - **A tela apagou:** toque no 💤 da barra superior (vira 💡) e ligue "Permanecer ativo" nas opções do
   desenvolvedor.
@@ -431,9 +507,11 @@ Depois, apague a pasta do projeto. Seu `settings.json` volta ao que era (com bac
 
 ```
 server/    index.js (HTTP + WebSocket + QR) · state.js (sessões) · usage.js (limites, logs, tempo)
-           approvals.js (aprovar pelo celular) · git.js · colors.js · fx.js (cotação) · simulator.js
+           approvals.js (aprovar pelo celular) · localsessions.js (sessões abertas neste PC)
+           websessions.js (sessões da web) · satellite.js (outros computadores)
+           git.js · colors.js · fx.js (cotação) · simulator.js
 hooks/     clawddesk-hook.js (eventos) · clawddesk-permission.js (aprovações) · clawddesk-statusline.js
-scripts/   setup.js (assistente) · setup-hooks.js · restart.js · demo.js · gen-icons.js
+scripts/   setup.js (assistente) · setup-hooks.js · restart.js · link.js (modo satélite) · demo.js · gen-icons.js
 ClawdDesk.command / ClawdDesk.bat   atalhos de dois cliques (Mac / Windows)
 public/    index.html · manifest.json · sw.js · css/ · js/ · fonts/ · icons/
 docs/      demo.gif · screenshots/

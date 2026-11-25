@@ -25,6 +25,22 @@ const short = (s, n = 60) => {
   const t = String(s).replace(/\s+/g, ' ').trim();
   return t.length > n ? t.slice(0, n - 1) + '…' : t;
 };
+// Texto do pedido para a tela: comandos digitados com "!" e slash commands chegam embrulhados em
+// tags (<bash-input>, <command-name>…). Mostra "$ comando" / "/comando args" em vez das tags.
+// (o hook corta o texto em 500 caracteres, então a tag de fechamento pode faltar)
+function promptText(raw) {
+  if (raw == null) return '';
+  let t = String(raw).replace(/<system-reminder>[\s\S]*?(<\/system-reminder>|$)/g, ' ');
+  const bash = t.match(/<bash-input>([\s\S]*?)(?:<\/bash-input>|$)/);
+  if (bash) return `$ ${bash[1].trim()}`;
+  const cmd = t.match(/<command-name>([\s\S]*?)<\/command-name>/);
+  if (cmd) {
+    const args = t.match(/<command-args>([\s\S]*?)(?:<\/command-args>|$)/);
+    return `${cmd[1].trim()} ${args ? args[1].trim() : ''}`.trim();
+  }
+  t = t.replace(/<(bash-stdout|bash-stderr|local-command-stdout|local-command-stderr)>[\s\S]*?(<\/\1>|$)/g, ' ');
+  return t;
+}
 const base = (p) => (p ? path.basename(String(p)) : '');
 const host = (u) => {
   try {
@@ -139,6 +155,8 @@ export class SessionStore extends EventEmitter {
     const cwd = p.cwd || (p.workspace && (p.workspace.project_dir || p.workspace.current_dir));
     if (cwd) s.cwd = cwd;
     if (p.transcript_path) s.transcriptPath = p.transcript_path;
+    if (p.workspace && p.workspace.project_dir) s.root = p.workspace.project_dir;
+    else if (cwd || p.transcript_path) s.root = projectRoot(s.cwd, s.transcriptPath) || s.root || s.cwd;
     s.aliveAt = now;
     return s;
   }
@@ -188,9 +206,9 @@ export class SessionStore extends EventEmitter {
         if (!stale) this.setState(s, 'idle');
         break;
       case 'UserPromptSubmit':
-        s.prompt = short(p.prompt, 160) || s.prompt;
+        s.prompt = short(promptText(p.prompt), 160) || s.prompt;
         s.question = null; // você respondeu
-        this.pushRecent(s, { icon: '💬', verb: 'Pedido', target: short(p.prompt, 90), kind: 'prompt' });
+        this.pushRecent(s, { icon: '💬', verb: 'Pedido', target: short(promptText(p.prompt), 90), kind: 'prompt' });
         s.turnStart = ts;
         s.toolCount = 0;
         s.tool = null;
@@ -342,6 +360,44 @@ export class SessionStore extends EventEmitter {
     this.emit('change');
   }
 
+  // Sessões abertas neste PC (fichas em ~/.claude/sessions): garante que todas apareçam, com o
+  // título, mesmo sem hook recente; e tira da lista as que foram fechadas.
+  syncLocal(reg) {
+    const now = Date.now();
+    let changed = false;
+    for (const info of reg.list.values()) {
+      let s = this.sessions.get(info.sessionId);
+      if (!s) {
+        s = this.get(info.sessionId, { cwd: info.cwd });
+        s.lastEventAt = info.updatedAt || now;
+        s.since = s.lastEventAt;
+        changed = true;
+      }
+      if (info.cwd) s.root = info.cwd; // pasta onde a sessão foi aberta = o projeto
+      if (!s.local || s.local.name !== info.name || s.local.status !== info.status) changed = true;
+      s.local = info;
+      s.aliveAt = now;
+      // sem hooks recentes (ex.: ClawdDesk acabou de abrir), usa o "ocupada/livre" da ficha
+      const quiet = now - s.lastEventAt > 20e3;
+      if (quiet && info.status === 'busy' && s.state === 'idle') {
+        s.turnStart = s.turnStart || info.updatedAt || now;
+        this.setState(s, 'thinking');
+        changed = true;
+      } else if (quiet && info.status === 'idle' && s.state === 'thinking') {
+        this.setState(s, 'idle');
+        changed = true;
+      }
+    }
+    // processo encerrado: a sessão foi fechada
+    for (const s of [...this.sessions.values()]) {
+      if (s.local && !reg.list.has(s.id)) {
+        this.sessions.delete(s.id);
+        changed = true;
+      }
+    }
+    if (changed) this.emit('change');
+  }
+
   tick() {
     const now = Date.now();
     let changed = false;
@@ -358,7 +414,8 @@ export class SessionStore extends EventEmitter {
       } else if (s.state === 'thinking' && quiet > THINKING_STALE_MS) {
         this.setState(s, 'idle');
         changed = true;
-      } else if (s.state === 'idle' && now - s.aliveAt > SESSION_TTL_MS) {
+      } else if (s.state === 'idle' && !s.local && now - s.aliveAt > SESSION_TTL_MS) {
+        // (sessões com ficha em ~/.claude/sessions saem quando o processo termina, em syncLocal)
         this.sessions.delete(s.id);
         changed = true;
       }
@@ -382,7 +439,9 @@ export class SessionStore extends EventEmitter {
     return {
       id: s.id,
       project: projectName(s, m),
-      name: s.name,
+      name: s.name || (s.local && s.local.name) || null,
+      origin: null, // null = este PC; satélites e web preenchem { kind, label }
+      bridgeId: s.local ? s.local.bridgeId : null,
       state: s.state,
       since: s.since,
       lastEventAt: s.lastEventAt,
@@ -414,6 +473,25 @@ export class SessionStore extends EventEmitter {
 }
 
 function projectName(s, m) {
-  const cwd = s.cwd || (m && m.cwd);
-  return cwd ? path.basename(cwd) : 'Claude Code';
+  const cwd = s.root || s.cwd || (m && m.cwd);
+  if (!cwd) return 'Claude Code';
+  const n = path.basename(cwd);
+  // pastas de rascunho do app Claude (mesmo nome usado na linha do tempo)
+  return /^scratch-\d{4}-\d{2}-\d{2}/.test(n) ? 'rascunho (app)' : n;
+}
+
+// Pasta onde a sessão foi aberta. O "cwd" dos hooks acompanha os "cd" do Claude (ex.: loja-online/
+// docs/posts), mas o projeto é a pasta de início, que o Claude Code codifica no nome da pasta do
+// transcript (~/.claude/projects/-Users-voce-code-loja-online/…). Sobe a partir do cwd até achar ela.
+const encodeDir = (d) => String(d).replace(/[^a-zA-Z0-9]/g, '-');
+function projectRoot(cwd, transcriptPath) {
+  if (!cwd) return null;
+  if (!transcriptPath) return cwd;
+  const key = path.basename(path.dirname(String(transcriptPath)));
+  for (let d = String(cwd); ; ) {
+    if (encodeDir(d) === key) return d;
+    const up = path.dirname(d);
+    if (up === d) return null; // fora da pasta do projeto (ex.: "cd /tmp"): mantém o nome que já tinha
+    d = up;
+  }
 }

@@ -224,7 +224,9 @@ export class Simulator extends EventEmitter {
     const proj = (name, ivs) => {
       const intervals = ivs.map(([a, b]) => [at(...a), at(...b)]).filter(([a, b]) => b > a);
       const colorIndex = { 'loja-online': 0, 'api-pagamentos': 3, 'site-institucional': 2 }[name] || 0;
-      return { key: name, name, colorIndex, total: intervals.reduce((t, [a, b]) => t + b - a, 0), intervals };
+      const p = { key: name, name, colorIndex, total: intervals.reduce((t, [a, b]) => t + b - a, 0), intervals };
+      // api-pagamentos é trabalhado no "Notebook" (modo satélite)
+      return name === 'api-pagamentos' ? { ...p, hosts: ['Notebook'], remoteOnly: true } : p;
     };
     const projects = [
       proj('loja-online', [[[8, 40], [9, 55]], [[10, 20], [11, 5]], [[13, 30], [15, 10]], [[15, 40], [24, 0]]]),
@@ -235,13 +237,15 @@ export class Simulator extends EventEmitter {
     return { dayStart: d0.getTime(), from: d0.getTime() + 7 * H, to: now, projects };
   }
 
-  // Outras sessões fictícias, para ver o painel de várias sessões funcionando.
+  // Outras sessões fictícias, para ver o painel de várias sessões funcionando — uma delas vinda
+  // de outro computador (modo satélite) e outra da web (claude.ai/code).
   fakeSessions(now) {
     const base = { name: null, message: null, lastEventAt: now, firstSeen: now - 3 * 3600e3 };
     return [
       {
         ...base,
         id: 'sim-2',
+        origin: { kind: 'pc', label: 'Notebook', online: true },
         project: 'api-pagamentos',
         state: 'thinking',
         since: now - 6 * MIN,
@@ -285,6 +289,31 @@ export class Simulator extends EventEmitter {
         pr: { number: 57, url: 'https://github.com/exemplo/site-institucional/pull/57', repo: 'exemplo/site-institucional' },
         work: { session: { total: 4 * MIN, today: 4 * MIN }, project: { total: 3 * 60 * MIN + 5 * MIN, today: 4 * MIN, sessions: 2, first: now - 3 * 864e5 } },
         recent: [{ ts: now - 14 * MIN, icon: '✅', verb: 'Concluído', target: '12 ferramentas', kind: 'done' }],
+      },
+      {
+        ...base,
+        id: 'sim-4',
+        origin: { kind: 'web', label: 'web' },
+        project: 'app-mobile',
+        name: 'Login com biometria',
+        state: 'idle',
+        since: now - 32 * MIN,
+        lastEventAt: now - 32 * MIN,
+        tool: null,
+        prompt: null,
+        message: 'Login por biometria pronto; PR aberto para revisão',
+        toolCount: 0,
+        turnStart: null,
+        lastDone: { at: now - 32 * MIN, duration: null, tools: null },
+        model: 'Opus 5.5',
+        context: { used: 310000, size: 1_000_000, pct: 31 },
+        cost: 2.61,
+        tokens: null,
+        colorIndex: 5,
+        git: { branch: 'claude/login-biometria', files: null },
+        pr: null,
+        work: null,
+        recent: [],
       },
     ];
   }

@@ -91,7 +91,8 @@ export class Approvals extends EventEmitter {
   // Chamado pela rota do hook. Responde na hora (sem decisão) quando ninguém pode responder pelo celular.
   request(info, res) {
     const wait = info.entrypoint === 'claude-desktop' ? WAIT_DESKTOP_MS : WAIT_MS;
-    if (!this.devices.length || !this.onlineCheck() || wait <= 0) {
+    // onlineCheck: celular pareado conectado aqui OU no ClawdDesk principal (modo satélite)
+    if (!this.onlineCheck() || wait <= 0) {
       res.json({ decision: null, reason: !this.devices.length ? 'sem aparelho pareado' : 'celular desconectado' });
       return null;
     }
