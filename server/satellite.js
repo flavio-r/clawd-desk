@@ -8,7 +8,8 @@
 //   do outro PC; Permitir/Negar no celular volta pelo mesmo WebSocket até o PC de origem.
 //
 // Segurança: o PC extra só é aceito com um token obtido pelo código de pareamento (o mesmo do
-// celular; fica em data/paired.json do principal só como hash). Tudo trafega apenas na rede local.
+// celular; fica em data/paired.json do principal só como hash). Na rede local trafega direto; com
+// um ClawdDesk online (modo servidor), vai por HTTPS/WSS até ele.
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -79,6 +80,39 @@ function cleanApproval(a) {
     expiresAt: num(a.expiresAt) || Date.now(),
   };
 }
+// Limites e gastos do PC (usage.view()): só números, booleanos e textos curtos, em poucos níveis.
+const BAD_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+function cleanDeep(v, depth = 0) {
+  if (v == null) return null;
+  if (typeof v === 'number') return Number.isFinite(v) ? v : null;
+  if (typeof v === 'boolean') return v;
+  if (typeof v === 'string') return v.slice(0, 60);
+  if (depth >= 4) return null;
+  if (Array.isArray(v)) return v.slice(0, 12).map((x) => cleanDeep(x, depth + 1));
+  if (typeof v !== 'object') return null;
+  const o = {};
+  for (const k of Object.keys(v).slice(0, 30)) if (/^[A-Za-z0-9_]{1,30}$/.test(k) && !BAD_KEYS.has(k)) o[k] = cleanDeep(v[k], depth + 1);
+  return o;
+}
+function cleanUsage(u) {
+  u = obj(u);
+  if (!u) return null;
+  const c = cleanDeep(u);
+  const win = (w) => (obj(w) ? w : { pct: null, resetsAt: null, source: 'estimativa' });
+  const per = (p) => (obj(p) ? { tokens: num(p.tokens) || 0, cost: num(p.cost) || 0 } : { tokens: 0, cost: 0 });
+  const t = obj(c.totals) || {};
+  return {
+    fiveHour: win(c.fiveHour),
+    sevenDay: win(c.sevenDay),
+    models: arr(c.models, 8).filter((m) => obj(m) && typeof m.name === 'string'),
+    plan: str(c.plan, 40),
+    oauth: str(c.oauth, 30),
+    calibration: obj(c.calibration),
+    totals: { today: per(t.today), week: per(t.week), block: obj(t.block) },
+    scanReady: !!c.scanReady,
+  };
+}
+
 function cleanTimeline(t) {
   t = obj(t);
   if (!t) return null;
@@ -153,6 +187,10 @@ export class SatelliteHub extends EventEmitter {
     s.timeline = cleanTimeline(msg.timeline);
     s.approvals = arr(msg.approvals, 10).map(cleanApproval).filter(Boolean);
     s.bridgeIds = arr(msg.bridgeIds, 500).filter((x) => typeof x === 'string').map((x) => x.slice(0, 80));
+    if (msg.usage) {
+      s.usage = cleanUsage(msg.usage);
+      s.usageAt = Date.now();
+    }
     s.at = Date.now();
     this.emit('change');
   }
@@ -171,6 +209,38 @@ export class SatelliteHub extends EventEmitter {
     }, 120e3);
     s.dropTimer.unref();
     this.emit('change');
+  }
+
+  // aparelho removido na tela: derruba a conexão do PC e tira as sessões dele
+  drop(id) {
+    const s = this.sats.get(id);
+    if (!s) return;
+    clearTimeout(s.dropTimer);
+    this.sats.delete(id);
+    if (s.ws) {
+      try {
+        s.ws.send(JSON.stringify({ type: 'satellite-denied' }));
+        s.ws.close();
+      } catch {
+        /* já fechou */
+      }
+    }
+    this.emit('log', `🖥  ${s.host} removido`);
+    this.emit('change');
+  }
+
+  // Modo servidor: os limites da conta vêm dos PCs. Vale a leitura oficial mais recente; os gastos
+  // de hoje e da semana somam todos os PCs.
+  usage() {
+    const now = Date.now();
+    const list = [...this.sats.values()].filter((s) => s.usage && now - s.usageAt < 30 * 60e3);
+    if (!list.length) return null;
+    const official = (u) => (u.sevenDay.source && u.sevenDay.source !== 'estimativa') || (u.fiveHour.source && u.fiveHour.source !== 'estimativa');
+    const fresh = (u) => Math.max(num(u.sevenDay.updatedAt) || 0, num(u.fiveHour.updatedAt) || 0);
+    list.sort((a, b) => official(b.usage) - official(a.usage) || fresh(b.usage) - fresh(a.usage) || b.usageAt - a.usageAt);
+    const best = list[0].usage;
+    const sum = (k) => list.reduce((acc, s) => ({ tokens: acc.tokens + s.usage.totals[k].tokens, cost: acc.cost + s.usage.totals[k].cost }), { tokens: 0, cost: 0 });
+    return { ...best, totals: { ...best.totals, today: sum('today'), week: sum('week') }, from: list[0].host };
   }
 
   result(msg) {
@@ -248,7 +318,7 @@ export class SatelliteHub extends EventEmitter {
   }
 
   view() {
-    return [...this.sats.values()].map((s) => ({ host: s.host, online: s.online, sessions: s.sessions.length, at: s.at }));
+    return [...this.sats.values()].map((s) => ({ id: s.id, host: s.host, online: s.online, sessions: s.sessions.length, at: s.at }));
   }
 }
 
@@ -344,8 +414,10 @@ export class SatelliteLink extends EventEmitter {
       const was = this.linked;
       this.linked = false;
       this.phonesOnline = false;
+      if (this.stopped) return this.emit('change'); // recusado pelo principal: já avisou, não tenta de novo
+      const where = /^https:/i.test(this.conf.url) ? 'ele está no ar e o endereço está certo?' : 'ele está aberto e no mesmo Wi-Fi?';
       if (was) this.log(`⚠  Conexão com o ClawdDesk principal caiu (${this.conf.url}) — tentando de novo…`);
-      else this.log(`⚠  Não consegui falar com o ClawdDesk principal em ${this.conf.url} — ele está aberto e no mesmo Wi-Fi? Tentando de novo…`);
+      else this.log(`⚠  Não consegui falar com o ClawdDesk principal em ${this.conf.url} — ${where} Tentando de novo…`);
       this.emit('change');
       this.reconnect();
     };

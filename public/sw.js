@@ -1,6 +1,6 @@
 // Service Worker do ClawdDesk: deixa o app instalável e abre a interface mesmo se o PC
 // estiver momentaneamente fora do ar (os dados em tempo real continuam vindo do WebSocket).
-const CACHE = 'clawddesk-v3';
+const CACHE = 'clawddesk-v4';
 const ASSETS = [
   '/',
   '/index.html',
@@ -42,10 +42,12 @@ self.addEventListener('activate', (e) => {
 self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
   if (e.request.method !== 'GET' || url.origin !== location.origin || url.pathname.startsWith('/api/') || url.pathname === '/ws') return;
+  // tela de login: sempre da rede (com login ligado, "/" sem cookie vira um redirecionamento para ela)
+  if (url.pathname === '/login' || url.pathname === '/login.html') return;
   e.respondWith(
     fetch(e.request)
       .then((res) => {
-        if (res.ok) {
+        if (res.ok && !res.redirected) {
           const copy = res.clone();
           caches.open(CACHE).then((c) => c.put(e.request, copy));
         }

@@ -1,0 +1,43 @@
+# ClawdDesk online: o ClawdDesk em modo servidor + Caddy na frente (HTTPS automático, Let's Encrypt).
+#
+#   1. Aponte o domínio (ex.: clawd.seusite.com.br) para o IP deste servidor (registro A/AAAA).
+#   2. cp .env.example .env   e preencha DOMAIN, CLAWDDESK_ADMIN_USER e CLAWDDESK_ADMIN_PASSWORD.
+#   3. docker compose up -d
+#   4. Abra https://SEU_DOMINIO, entre e ligue os PCs em 👤 → Conectar um PC.
+#
+# Mais usuários: docker compose exec clawddesk node scripts/user.js add NOME
+services:
+  clawddesk:
+    build: .
+    image: clawddesk:latest
+    restart: unless-stopped
+    environment:
+      CLAWDDESK_ADMIN_USER: ${CLAWDDESK_ADMIN_USER:-}
+      CLAWDDESK_ADMIN_PASSWORD: ${CLAWDDESK_ADMIN_PASSWORD:-}
+      CLAWDDESK_NAME: ${CLAWDDESK_NAME:-Servidor}
+      TZ: ${TZ:-America/Sao_Paulo}
+    volumes:
+      - clawddesk-data:/data
+    expose:
+      - "3456"
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      - clawddesk
+    ports:
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+      - "${HTTPS_PORT:-443}:443/udp"
+    environment:
+      DOMAIN: "${DOMAIN:?defina DOMAIN no arquivo .env, por exemplo clawd.seusite.com.br}"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
+volumes:
+  clawddesk-data:
+  caddy-data:
+  caddy-config:

@@ -20,6 +20,7 @@ import { describeTool } from './state.js';
 import { LocalSessions } from './localsessions.js';
 import { WebSessions } from './websessions.js';
 import { SatelliteHub, SatelliteLink } from './satellite.js';
+import { Auth } from './auth.js';
 
 const usage = new UsageTracker();
 const store = new SessionStore(usage);
@@ -35,6 +36,24 @@ const logLine = (msg) => {
   if (!cfg.QUIET) console.log(`  [${new Date().toTimeString().slice(0, 8)}] ${msg}`);
 };
 
+// login com usuário e senha (sempre no modo servidor; no local, só se houver usuário criado)
+const auth = new Auth();
+let authBootMsg = null;
+try {
+  authBootMsg = await auth.bootstrap();
+} catch (e) {
+  authBootMsg = `não deu para criar o usuário de CLAWDDESK_ADMIN_USER: ${e.message}`;
+}
+if (cfg.SERVER && !auth.users.length) {
+  const b = (s) => `\x1b[1m${s}\x1b[0m`;
+  console.error(`\n  ✖ Modo servidor sem nenhum usuário: ninguém conseguiria entrar.${authBootMsg ? `\n    (${authBootMsg})` : ''}`);
+  console.error(`    Crie o primeiro: ${b('npm run user -- add SEU_NOME')}`);
+  console.error(`    ou defina ${b('CLAWDDESK_ADMIN_USER')} e ${b('CLAWDDESK_ADMIN_PASSWORD')} (mínimo de 8 caracteres) e inicie de novo.\n`);
+  process.exit(1);
+}
+// com login, o código para ligar PCs é gerado na tela (uso único, 10 min), não fica fixo no terminal
+if (auth.enabled) approvals.useOneTimeCodes();
+
 // sessões abertas neste PC (fichas do Claude Code em ~/.claude/sessions)
 const localSessions = new LocalSessions();
 localSessions.on('change', () => store.syncLocal(localSessions));
@@ -47,6 +66,7 @@ const link = new SatelliteLink({
     timeline: usage.timelineView(),
     approvals: approvals.view().open,
     bridgeIds: [...localSessions.bridgeIds(), ...usage.bridgeIds],
+    usage: usage.view(), // limites e gastos (o ClawdDesk online mostra os da conta a partir daqui)
   }),
   // Permitir/Negar feito no celular do PC principal para um pedido deste PC
   onDecision: (id, decision) => {
@@ -134,7 +154,8 @@ function snapshot() {
     serverTime: Date.now(),
     primary: sessions[0] || null,
     sessions: sessions.slice(0, 10),
-    usage: usage.view(),
+    usage: cfg.SERVER ? hub.usage() || { ...usage.view(), oauth: 'servidor' } : usage.view(),
+    mode: cfg.MODE,
     hooks: store.hooks,
     statusline: store.statusline,
     sim: { active: false },
@@ -148,11 +169,121 @@ function snapshot() {
 }
 
 const LOCAL = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
-const localOnly = (req, res, next) =>
-  LOCAL.has(req.socket.remoteAddress) ? next() : res.status(403).json({ error: 'permitido apenas a partir do próprio PC' });
+// Hooks e statusLine: só do próprio PC. Um pedido que passou por proxy (cabeçalhos X-Forwarded-*)
+// também é recusado, mesmo chegando de 127.0.0.1. No modo servidor essas rotas nem existem.
+const localOnly = (req, res, next) => {
+  if (cfg.SERVER) return res.status(404).json({ error: 'não existe no modo servidor' });
+  const proxied = req.headers['x-forwarded-for'] || req.headers.forwarded || req.headers['x-real-ip'];
+  return LOCAL.has(req.socket.remoteAddress) && !proxied ? next() : res.status(403).json({ error: 'permitido apenas a partir do próprio PC' });
+};
+
+// mesmo site? (impede que outra página use o navegador logado para aprovar ou mudar algo)
+function sameOrigin(req) {
+  const o = req.headers.origin;
+  if (!o) return true;
+  try {
+    return new URL(o).host === req.headers.host;
+  } catch {
+    return false;
+  }
+}
+// endereço de quem chamou (atrás do proxy, vem do X-Forwarded-For que o proxy acrescentou)
+function clientIp(req) {
+  const xff = cfg.TRUST_PROXY ? String(req.headers['x-forwarded-for'] || '').split(',').map((x) => x.trim()).filter(Boolean) : [];
+  const ip = xff.length ? xff[Math.max(0, xff.length - cfg.TRUST_PROXY)] : req.socket.remoteAddress;
+  return String(ip || '').replace(/^::ffff:/, '');
+}
+const who = (req) => (auth.enabled ? auth.check(req.headers.cookie) : null);
+// rotas que exigem login (quando ele está ligado)
+const requireLogin = (req, res, next) => {
+  if (!auth.enabled) return next();
+  const a = who(req);
+  if (!a) return res.status(401).json({ error: 'faça login', login: true });
+  if (req.method !== 'GET' && !sameOrigin(req)) return res.status(403).json({ error: 'origem não permitida' });
+  req.auth = a;
+  next();
+};
+// endereço que os outros PCs usam para chegar aqui
+function publicUrl(req) {
+  if (cfg.PUBLIC_URL) return cfg.PUBLIC_URL;
+  const host = String(req.headers.host || '');
+  // no PC, "localhost" não serve para os outros: usa o endereço da rede (no servidor, vale o do navegador)
+  if (!host || (!cfg.SERVER && /^(localhost|127\.|\[::1\])/.test(host))) {
+    const lan = lanAddresses()[0];
+    return lan ? `http://${lan.address}:${cfg.PORT}` : `http://ENDEREÇO:${cfg.PORT}`;
+  }
+  return `${req.protocol}://${host}`;
+}
 
 const app = express();
 app.disable('x-powered-by');
+if (cfg.TRUST_PROXY) app.set('trust proxy', cfg.TRUST_PROXY);
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Content-Security-Policy', "frame-ancestors 'none'");
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  next();
+});
+
+app.get('/api/health', (req, res) => res.json({ ok: true }));
+
+// ---- login
+app.get('/api/me', (req, res) => {
+  const a = who(req);
+  res.json({ login: auth.enabled, user: a ? a.user : null, mode: cfg.MODE });
+});
+app.post('/api/login', express.json({ limit: '4kb' }), async (req, res) => {
+  if (!auth.enabled) return res.status(404).json({ ok: false, error: 'o login não está ligado' });
+  if (!sameOrigin(req)) return res.status(403).json({ ok: false, error: 'origem não permitida' });
+  const ip = clientIp(req);
+  const { user, password } = req.body || {};
+  const r = await auth.login(user, password, ip, req.headers['user-agent']);
+  if (!r.ok) {
+    logLine(`🔐 Login recusado (${ip}): ${r.error}`);
+    return res.status(r.status).json({ ok: false, error: r.error });
+  }
+  logLine(`🔐 ${r.user} entrou (${ip})`);
+  res.setHeader('Set-Cookie', auth.cookie(r.token, req.secure));
+  res.json({ ok: true, user: r.user });
+});
+app.post('/api/logout', (req, res) => {
+  const a = who(req);
+  if (a && sameOrigin(req)) {
+    auth.logout(a.hash);
+    for (const c of wss.clients) if (c.auth && c.auth.hash === a.hash) c.close(4401, 'login');
+  }
+  res.setHeader('Set-Cookie', auth.clearCookie(req.secure));
+  res.json({ ok: true });
+});
+
+// ---- PCs ligados a este ClawdDesk (com login): código de uso único e lista para remover
+app.post('/api/link-code', requireLogin, (req, res) => {
+  if (!auth.enabled) return res.status(404).json({ error: 'sem login, o código fica no terminal do PC' });
+  const r = approvals.newCode();
+  logLine(`🔐 ${req.auth.user} gerou um código para ligar um PC (vale 10 min)`);
+  res.json({ ...r, url: publicUrl(req) });
+});
+app.get('/api/devices', requireLogin, (req, res) => {
+  const online = new Map(hub.view().map((s) => [s.id, s]));
+  res.json(approvals.devicesView().map((d) => ({ ...d, online: !!(online.get(d.id) || {}).online, host: (online.get(d.id) || {}).host || null })));
+});
+app.post('/api/devices/remove', requireLogin, express.json({ limit: '2kb' }), (req, res) => {
+  const id = String((req.body && req.body.id) || '');
+  const d = approvals.removeDevice(id);
+  if (!d) return res.status(404).json({ ok: false, error: 'esse PC já foi removido' });
+  hub.drop(id);
+  logLine(`🔐 ${req.auth ? req.auth.user : 'alguém'} removeu "${d.label}"`);
+  res.json({ ok: true });
+});
+
+// ---- páginas: sem login, a tela principal manda para /login
+app.get(['/', '/index.html'], (req, res, next) => (auth.enabled && !who(req) ? res.redirect(302, '/login') : next()));
+app.get(['/login', '/login.html'], (req, res) => {
+  if (!auth.enabled || who(req)) return res.redirect(302, '/');
+  res.setHeader('Cache-Control', 'no-store');
+  res.sendFile(path.join(cfg.PUBLIC_DIR, 'login.html'));
+});
 
 // Hooks e statusLine só são aceitos do próprio PC (localhost).
 app.post('/api/event', localOnly, express.json({ limit: '5mb' }), (req, res) => {
@@ -196,9 +327,11 @@ app.post('/api/permission/request', localOnly, express.json({ limit: '5mb' }), (
 
 app.post('/api/permission/decision', express.json({ limit: '10kb' }), async (req, res) => {
   const { id, decision, token } = req.body || {};
+  // quem pode responder: com login, quem está logado; sem login, o aparelho pareado pelo código
+  const allowed = auth.enabled ? !!who(req) && sameOrigin(req) : !!approvals.verify(token);
+  if (!allowed) return res.status(401).json({ ok: false, error: auth.enabled ? 'faça login de novo' : 'aparelho não pareado', login: auth.enabled });
   // pedido de OUTRO PC (modo satélite): repassa a resposta para ele
   if (typeof id === 'string' && id.startsWith('sat:')) {
-    if (!approvals.verify(token)) return res.status(401).json({ ok: false, error: 'aparelho não pareado' });
     if (decision !== 'allow' && decision !== 'deny') return res.status(400).json({ ok: false, error: 'decisão inválida' });
     const r = await hub.decide(id, decision);
     if (!r.ok) return res.status(r.status).json({ ok: false, error: r.error });
@@ -206,11 +339,10 @@ app.post('/api/permission/decision', express.json({ limit: '10kb' }), async (req
     return res.json({ ok: true });
   }
   if (typeof id === 'string' && id.startsWith('sim-')) {
-    if (!approvals.verify(token)) return res.status(401).json({ ok: false, error: 'aparelho não pareado' });
     const ok = sim.remoteDecide(id, decision);
     return res.status(ok ? 200 : 410).json(ok ? { ok: true } : { ok: false, error: 'esse pedido já foi respondido ou expirou' });
   }
-  const r = approvals.decide(String(id || ''), decision, token);
+  const r = approvals.decide(String(id || ''), decision);
   if (!r.ok) return res.status(r.status).json({ ok: false, error: r.error });
   store.remoteDecision(r.item.sessionId, decision, r.item.tool);
   if (!cfg.QUIET) {
@@ -222,16 +354,17 @@ app.post('/api/permission/decision', express.json({ limit: '10kb' }), async (req
 
 // pareamento: o código aparece no terminal do PC e na página aberta no próprio PC
 app.post('/api/pair', express.json({ limit: '2kb' }), (req, res) => {
-  const ip = String(req.socket.remoteAddress || '').replace(/^::ffff:/, '');
-  const r = approvals.pair(req.body && req.body.code, req.body && req.body.label, ip);
-  if (!cfg.QUIET) {
-    const t = new Date().toTimeString().slice(0, 8);
-    console.log(r.ok ? `  [${t}] 🔐 Aparelho pareado (${ip}) — já pode aprovar pedidos pelo celular` : `  [${t}] 🔐 Tentativa de pareamento recusada (${ip}): ${r.error}`);
-  }
+  const ip = clientIp(req);
+  const label = String((req.body && req.body.label) || '');
+  const r = approvals.pair(req.body && req.body.code, label, ip);
+  if (r.ok) logLine(/^PC:/.test(label) ? `🔐 ${label.slice(3).trim() || 'Outro PC'} pareado (${ip}) — as sessões dele vão aparecer aqui` : `🔐 Aparelho pareado (${ip}) — já pode aprovar pedidos pelo celular`);
+  else logLine(`🔐 Tentativa de pareamento recusada (${ip}): ${r.error}`);
   res.status(r.ok ? 200 : 403).json(r);
 });
 app.post('/api/unpair', express.json({ limit: '2kb' }), (req, res) => res.json({ ok: approvals.unpair(req.body && req.body.token) }));
-app.get('/api/pair/code', localOnly, (req, res) => res.json({ code: approvals.codeFormatted, paired: approvals.devices.length }));
+app.get('/api/pair/code', localOnly, (req, res) =>
+  auth.enabled ? res.status(404).json({ error: 'com login, gere o código na tela' }) : res.json({ code: approvals.codeFormatted, paired: approvals.devices.length })
+);
 
 app.post('/api/statusline', localOnly, express.json({ limit: '2mb' }), (req, res) => {
   try {
@@ -242,20 +375,22 @@ app.post('/api/statusline', localOnly, express.json({ limit: '2mb' }), (req, res
   res.status(204).end();
 });
 
-app.get('/api/state', (req, res) => res.json(snapshot()));
+app.get('/api/state', requireLogin, (req, res) => res.json(snapshot()));
 
-app.post('/api/simulate', express.json({ limit: '10kb' }), (req, res) => {
+app.post('/api/simulate', requireLogin, express.json({ limit: '10kb' }), (req, res) => {
   const ok = sim.run(String((req.body && req.body.scenario) || ''));
   res.status(ok ? 200 : 400).json({ ok, sim: sim.view() });
 });
 
 let qrSvgCache = null;
 app.get('/api/info', async (req, res) => {
-  const lan = lanAddresses().map((a) => ({ ...a, url: `http://${a.address}:${cfg.PORT}` }));
+  // sem login: só o bastante para o "npm run link" saber que aqui é um ClawdDesk
+  if (auth.enabled && !who(req)) return res.json({ app: 'clawddesk', port: cfg.PORT, mode: cfg.MODE, login: true });
+  const lan = cfg.SERVER ? [] : lanAddresses().map((a) => ({ ...a, url: `http://${a.address}:${cfg.PORT}` }));
   if (!qrSvgCache && lan[0]) {
     qrSvgCache = await QRCode.toString(lan[0].url, { type: 'svg', margin: 1, color: { dark: '#000000', light: '#ffffff' } });
   }
-  res.json({ port: cfg.PORT, lan, qrSvg: qrSvgCache, hooksInstalled: hooksInstalled() });
+  res.json({ app: 'clawddesk', port: cfg.PORT, mode: cfg.MODE, login: auth.enabled, lan, qrSvg: cfg.SERVER ? null : qrSvgCache, hooksInstalled: cfg.SERVER ? null : hooksInstalled() });
 });
 
 app.use(
@@ -286,7 +421,7 @@ function logClient(ws, what) {
   if (cfg.QUIET) return;
   const i = ws.info;
   const t = new Date().toTimeString().slice(0, 8);
-  const who = `${i.self ? '💻' : '📱'} ${i.device} ${i.ip}`;
+  const who = `${i.self ? '💻' : '📱'} ${i.device} ${i.ip}${i.user ? ` (${i.user})` : ''}`;
   if (what === 'desconectado') return console.log(`  [${t}] ${who} desconectado`);
   const status = !i.version
     ? '⚠  versão ANTIGA — recarregue a página uma vez (⋮ → ↻); depois ela se atualiza sozinha'
@@ -296,15 +431,32 @@ function logClient(ws, what) {
   console.log(`  [${t}] ${who} conectado · ${status}`);
 }
 
+// mesmo site no WebSocket (o navegador manda Origin; os outros PCs, não)
+function wsOriginOk(req) {
+  const o = req.headers.origin;
+  if (!o) return true;
+  try {
+    return new URL(o).host === req.headers.host;
+  } catch {
+    return false;
+  }
+}
+
 wss.on('connection', (ws, req) => {
   ws.isAlive = true;
-  const ip = String(req.socket.remoteAddress || '').replace(/^::ffff:/, '');
-  const self = ip === '127.0.0.1' || ip === '::1' || lanAddresses().some((a) => a.address === ip);
+  const ip = clientIp(req);
+  const self = !cfg.SERVER && (ip === '127.0.0.1' || ip === '::1' || lanAddresses().some((a) => a.address === ip));
   ws.info = { ip, self, device: self ? 'este PC' : deviceOf(req.headers['user-agent']), connectedAt: Date.now(), version: null };
+  // Quem pode ver a tela: com login, só quem tem o cookie válido. Outros PCs (satélites) entram
+  // sem cookie, mas só passam se mandarem "satellite-hello" com o token do pareamento.
+  ws.cookie = req.headers.cookie || '';
+  ws.auth = auth.enabled ? auth.check(ws.cookie) : null;
+  ws.viewer = !auth.enabled || (!!ws.auth && wsOriginOk(req));
+  if (ws.auth) ws.info.user = ws.auth.user;
   ws.on('pong', () => (ws.isAlive = true));
   ws.on('message', (m) => {
     const txt = String(m);
-    if (txt === 'ping') return ws.send('{"type":"pong"}');
+    if (txt === 'ping') return ws.viewer || ws.sat ? ws.send('{"type":"pong"}') : ws.close(4401, 'login');
     let msg;
     try {
       msg = JSON.parse(txt);
@@ -312,37 +464,48 @@ wss.on('connection', (ws, req) => {
       return;
     }
     if (msg && msg.type === 'hello' && typeof msg.version === 'string') {
+      if (!ws.viewer) return ws.close(4401, 'login');
       const changed = ws.info.version !== msg.version.slice(0, 40);
       ws.info.version = msg.version.slice(0, 40);
-      ws.info.paired = !!approvals.verify(msg.token);
-      ws.send(JSON.stringify({ type: 'auth', paired: ws.info.paired }));
+      // com login, estar logado já permite responder pelo celular; sem login, vale o pareamento
+      ws.info.paired = auth.enabled ? true : !!approvals.verify(msg.token);
+      ws.send(JSON.stringify({ type: 'auth', paired: ws.info.paired, login: auth.enabled, user: ws.auth ? ws.auth.user : null }));
       if (changed) logClient(ws, 'conectado');
       hub.broadcastStatus(phonesOnline());
     }
     // outro computador (modo satélite)
     else if (msg && msg.type === 'satellite-hello') {
       clearTimeout(ws.helloTimer);
+      ws.viewer = false;
       hub.hello(ws, msg);
       if (ws.sat) hub.broadcastStatus(phonesOnline());
     } else if (msg && msg.type === 'satellite-state' && ws.sat) hub.state(ws, msg);
     else if (msg && msg.type === 'decision-result' && ws.sat) hub.result(msg);
   });
-  // interfaces antigas não mandam "hello": depois de 6 s sem resposta, avisa que precisa recarregar
-  ws.helloTimer = setTimeout(() => {
-    if (!ws.info.version) logClient(ws, 'conectado');
-  }, 6000);
+  ws.helloTimer = ws.viewer
+    ? // interfaces antigas não mandam "hello": depois de 6 s sem resposta, avisa que precisa recarregar
+      setTimeout(() => {
+        if (!ws.info.version) logClient(ws, 'conectado');
+      }, 6000)
+    : // sem login e sem ser outro PC: fecha
+      setTimeout(() => {
+        if (!ws.sat) ws.close(4401, 'login');
+      }, 10e3);
   ws.on('close', () => {
     clearTimeout(ws.helloTimer);
     if (ws.sat) return hub.closed(ws);
     if (ws.info.logged) logClient(ws, 'desconectado');
     hub.broadcastStatus(phonesOnline());
   });
-  ws.send(JSON.stringify({ type: 'snapshot', data: snapshot() }));
+  if (ws.viewer) {
+    ws.send(JSON.stringify({ type: 'access', login: auth.enabled, user: ws.auth ? ws.auth.user : null, mode: cfg.MODE }));
+    ws.send(JSON.stringify({ type: 'snapshot', data: snapshot() }));
+  } else ws.send(JSON.stringify({ type: 'login-required' }));
 });
 
-app.get('/api/clients', (req, res) =>
+app.get('/api/clients', requireLogin, (req, res) =>
   res.json(
-    [...wss.clients].filter((c) => !c.sat).map((c) => ({
+    [...wss.clients].filter((c) => c.viewer).map((c) => ({
       ip: c.info.ip,
       device: c.info.device,
       version: c.info.version,
@@ -358,6 +521,11 @@ setInterval(() => {
       ws.terminate();
       continue;
     }
+    // login removido, senha trocada ou expirado: tira a tela do ar
+    if (auth.enabled && ws.viewer && !auth.check(ws.cookie)) {
+      ws.close(4401, 'login');
+      continue;
+    }
     ws.isAlive = false;
     ws.ping();
   }
@@ -369,14 +537,14 @@ function broadcast() {
   pending = setTimeout(() => {
     pending = null;
     if (!wss.clients.size) return;
-    const viewers = [...wss.clients].filter((ws) => ws.readyState === 1 && !ws.sat);
+    const viewers = [...wss.clients].filter((ws) => ws.readyState === 1 && ws.viewer);
     if (!viewers.length) return;
     const msg = JSON.stringify({ type: 'snapshot', data: snapshot() });
     for (const ws of viewers) ws.send(msg);
   }, 80);
 }
 // há celular pareado olhando? (satélites não contam)
-const phonesOnline = () => [...wss.clients].some((c) => c.readyState === 1 && !c.sat && c.info && c.info.paired);
+const phonesOnline = () => [...wss.clients].some((c) => c.readyState === 1 && c.viewer && c.info && c.info.paired);
 const pushToHub = () => link.push();
 for (const src of [store, approvals, gitTracker, usage]) {
   src.on('change', broadcast);
@@ -388,7 +556,7 @@ hub.on('change', broadcast);
 link.on('change', broadcast);
 hub.on('log', logLine);
 link.on('log', logLine);
-web.isWatched = () => [...wss.clients].some((c) => c.readyState === 1 && !c.sat);
+web.isWatched = () => [...wss.clients].some((c) => c.readyState === 1 && c.viewer);
 web.on('status', (st, before) => {
   const msg = {
     ok: '☁  Sessões da web (claude.ai/code) conectadas',
@@ -451,12 +619,31 @@ server.on('error', (e) => {
   process.exit(1);
 });
 
+// Modo servidor: nada de Claude Code nesta máquina; só login, PCs ligados e a tela.
+function serverBanner(b, c, d) {
+  const users = auth.users.map((u) => u.name);
+  console.log('');
+  console.log(`  ${b('🤖 ClawdDesk')} ${d('— modo servidor (online)')}`);
+  console.log('');
+  console.log(`  Ouvindo em:  ${c(`http://${cfg.HOST}:${cfg.PORT}`)} ${d(cfg.TRUST_PROXY ? '(atrás do proxy HTTPS)' : '(sem proxy)')}`);
+  if (cfg.PUBLIC_URL) console.log(`  Endereço:    ${b(c(cfg.PUBLIC_URL))}`);
+  if (authBootMsg) console.log(`  👤 ${authBootMsg}`);
+  console.log(`  👤 Usuários: ${b(users.join(', '))} ${d('(npm run user -- list | add | passwd | remove)')}`);
+  console.log(`  🖥  PCs ligados: ${approvals.devices.length} ${d('· para ligar outro: entre na tela → 👤 → Conectar um PC')}`);
+  console.log(`  ${d('Ctrl+C para encerrar.')}\n`);
+}
+
 server.listen(cfg.PORT, cfg.HOST, async () => {
   const lan = lanAddresses();
   const phoneUrl = lan[0] ? `http://${lan[0].address}:${cfg.PORT}` : null;
   const b = (s) => `\x1b[1m${s}\x1b[0m`;
   const c = (s) => `\x1b[36m${s}\x1b[0m`;
   const d = (s) => `\x1b[2m${s}\x1b[0m`;
+  if (cfg.SERVER) {
+    serverBanner(b, c, d);
+    fx.start();
+    return;
+  }
   console.log('');
   console.log(`  ${b('🤖 ClawdDesk')} ${d('— monitor de mesa para o Claude Code')}`);
   console.log('');
@@ -486,10 +673,15 @@ server.listen(cfg.PORT, cfg.HOST, async () => {
   );
   if (cfg.WEB_ENABLED) console.log(`  ☁  Sessões da web e de outros PCs (claude.ai): ligadas ${d('(CLAWDDESK_WEB=0 desativa)')}`);
   if (link.enabled) console.log(`  🛰  Este PC (${b(cfg.MACHINE_NAME)}) envia as sessões para o ClawdDesk principal em ${c(link.conf.url)} ${d('(npm run unlink desfaz)')}`);
-  console.log(
-    `  🔐 Código para parear o celular ou outro PC: ${b(approvals.codeFormatted)}` +
-      d(approvals.devices.length ? `  · ${approvals.devices.length} aparelho(s) já pareado(s)` : '')
-  );
+  if (auth.enabled) {
+    if (authBootMsg) console.log(`  👤 ${authBootMsg}`);
+    console.log(`  🔐 Login ligado: ${b(auth.users.map((u) => u.name).join(', '))} ${d('(npm run user -- list | add | passwd | remove)')}`);
+    console.log(`  🖥  Para ligar outro PC: entre na tela → 👤 → Conectar um PC ${d('(o código vale 10 min, uma vez)')}`);
+  } else
+    console.log(
+      `  🔐 Código para parear o celular ou outro PC: ${b(approvals.codeFormatted)}` +
+        d(approvals.devices.length ? `  · ${approvals.devices.length} aparelho(s) já pareado(s)` : '')
+    );
   // passo a passo para quem está configurando pela primeira vez (npm run setup)
   if (process.env.CLAWDDESK_GUIDE === '1') {
     const y = (s) => `\x1b[33m${s}\x1b[0m`;
@@ -498,7 +690,8 @@ server.listen(cfg.PORT, cfg.HOST, async () => {
     console.log(`   ${y('1.')} Conecte o celular no ${b('mesmo Wi-Fi')} deste computador.`);
     console.log(`   ${y('2.')} Abra a ${b('câmera')} e aponte para o QR Code acima` + (phoneUrl ? ` (ou digite no navegador: ${c(phoneUrl)})` : '') + '.');
     console.log(`   ${y('3.')} Toque em ${b('"Toque para ativar modo mesa"')}. Pronto, o monitor está funcionando!`);
-    console.log(`   ${y('4.')} ${d('Opcional:')} para aprovar pedidos pelo celular, toque em ${b('🧪 → Parear / gerenciar')} e digite ${b(approvals.codeFormatted)}.`);
+    if (auth.enabled) console.log(`   ${y('4.')} Entre com seu usuário e senha. Logado, o celular já pode aprovar os pedidos.`);
+    else console.log(`   ${y('4.')} ${d('Opcional:')} para aprovar pedidos pelo celular, toque em ${b('🧪 → Parear / gerenciar')} e digite ${b(approvals.codeFormatted)}.`);
     console.log(`   ${y('5.')} Reinicie as sessões do Claude Code que já estavam abertas.`);
     console.log('');
     console.log(`  ${d('Para testar sem gastar nada: toque em 🧪 no celular e escolha "Demo automático".')}`);

@@ -16,6 +16,24 @@ export const MACHINE_NAME = (process.env.CLAWDDESK_NAME || os.hostname().replace
 export const PORT = num(process.env.CLAWDDESK_PORT, 3456);
 export const HOST = process.env.CLAWDDESK_HOST || '0.0.0.0';
 
+// Dois jeitos de rodar:
+//   local    (padrão) no PC onde você usa o Claude Code; o celular abre pela rede Wi-Fi.
+//   server   num servidor online (VPS, Docker). Não lê nada do Claude Code da máquina: só recebe
+//            as sessões dos PCs ligados a ele (npm run link) e exige login com usuário e senha.
+//            Ligue com CLAWDDESK_MODE=server ou npm run server.
+export const MODE = process.env.CLAWDDESK_MODE === 'server' || process.argv.includes('--server') ? 'server' : 'local';
+export const SERVER = MODE === 'server';
+// Atrás de um proxy HTTPS (Caddy, nginx…): confia no X-Forwarded-For/Proto desse proxy.
+// No modo servidor vem ligado (1 salto); desligue com CLAWDDESK_TRUST_PROXY=0 se expuser direto.
+export const TRUST_PROXY = process.env.CLAWDDESK_TRUST_PROXY ? num(process.env.CLAWDDESK_TRUST_PROXY, 0) : SERVER ? 1 : 0;
+// Endereço público (ex.: https://clawd.seudominio.com.br), usado nas instruções para ligar PCs.
+export const PUBLIC_URL = (process.env.CLAWDDESK_PUBLIC_URL || '').replace(/\/+$/, '');
+// Primeiro usuário criado (ou senha trocada) ao iniciar; útil no Docker. Mínimo de 8 caracteres.
+export const ADMIN_USER = process.env.CLAWDDESK_ADMIN_USER || '';
+export const ADMIN_PASSWORD = process.env.CLAWDDESK_ADMIN_PASSWORD || '';
+// Quanto tempo o login dura sem uso (dias). Cada acesso renova.
+export const LOGIN_DAYS = Math.max(1, num(process.env.CLAWDDESK_LOGIN_DAYS, 90));
+
 export const CLAUDE_DIR = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
 export const PROJECTS_DIR = path.join(CLAUDE_DIR, 'projects');
 export const SETTINGS_FILE = path.join(CLAUDE_DIR, 'settings.json');
@@ -23,7 +41,7 @@ export const SETTINGS_FILE = path.join(CLAUDE_DIR, 'settings.json');
 // Leitura do uso real (5h / semanal) pela API OAuth do Claude.ai (mesma fonte do /usage).
 // O token é lido do Keychain (macOS) ou de ~/.claude/.credentials.json e NUNCA sai do PC
 // a não ser para api.anthropic.com. Desative com CLAWDDESK_OAUTH=0.
-export const OAUTH_ENABLED = process.env.CLAWDDESK_OAUTH !== '0';
+export const OAUTH_ENABLED = process.env.CLAWDDESK_OAUTH !== '0' && !SERVER;
 export const OAUTH_POLL_MS = Math.max(60, num(process.env.CLAWDDESK_OAUTH_POLL_S, 120)) * 1000;
 
 // Fallback por estimativa (só quando não há dados oficiais): limites em USD equivalentes.

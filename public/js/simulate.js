@@ -78,10 +78,11 @@ export class SimPanel {
     this.pairLabel = document.createElement('span');
     this.pairLabel.textContent = '🔐 Aprovar pelo celular: este aparelho não está pareado';
     pairRow.appendChild(this.pairLabel);
-    pairRow.appendChild(btn('Parear / gerenciar', 'sim-btn ghost', () => {
+    this.pairBtn = btn('Parear / gerenciar', 'sim-btn ghost', () => {
       this.close();
       this.onPair();
-    }));
+    });
+    pairRow.appendChild(this.pairBtn);
     card.appendChild(pairRow);
 
     card.appendChild(btn('⏹ Sair da simulação (voltar ao real)', 'sim-btn stop', () => this.send('stop')));
@@ -106,18 +107,22 @@ export class SimPanel {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ scenario }),
       });
+      if (r.status === 401) return location.replace('/login');
       this.status.textContent = r.ok ? (scenario === 'stop' ? 'Simulação encerrada.' : `Cenário: ${scenario}`) : 'Erro ao simular.';
     } catch {
       this.status.textContent = 'Sem conexão com o PC.';
     }
   }
 
-  setPairStatus(paired) {
+  setPairStatus(paired, login = false) {
     if (this.pairLabel) {
-      this.pairLabel.textContent = paired
-        ? '🔐 Aprovar pelo celular: este aparelho está pareado ✓'
-        : '🔐 Aprovar pelo celular: este aparelho não está pareado';
+      this.pairLabel.textContent = login
+        ? '🔐 Aprovar pelo celular: liberado pelo login ✓'
+        : paired
+          ? '🔐 Aprovar pelo celular: este aparelho está pareado ✓'
+          : '🔐 Aprovar pelo celular: este aparelho não está pareado';
     }
+    if (this.pairBtn) this.pairBtn.textContent = login ? 'Conta e PCs' : 'Parear / gerenciar';
   }
 
   open() {

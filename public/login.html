@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#000000">
+  <meta name="color-scheme" content="dark light">
+  <meta name="robots" content="noindex, nofollow">
+  <title>Entrar · ClawdDesk</title>
+  <link rel="manifest" href="/manifest.json">
+  <link rel="icon" href="/icons/favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/icons/icon-192.png">
+  <link rel="stylesheet" href="/css/style.css">
+  <link rel="stylesheet" href="/css/login.css">
+  <!-- mesmo tema salvo da tela principal -->
+  <script>try{var m={claro:"light",light:"light",escuro:"dark",dark:"dark",auto:"auto",automatico:"auto"},p=m[localStorage.getItem("cd.theme")]||"dark";document.documentElement.dataset.theme=p==="light"||(p==="auto"&&matchMedia("(prefers-color-scheme: light)").matches)?"light":"dark"}catch(e){}</script>
+</head>
+<body class="login-page">
+  <main class="login-box">
+    <div class="login-brand"><img src="/icons/favicon.svg" alt="" width="40" height="40"><span>CLAWD<b>DESK</b></span></div>
+    <p class="login-sub">Monitor de mesa para o Claude Code</p>
+    <form id="login-form" class="login-form" novalidate>
+      <label for="user">Usuário</label>
+      <input id="user" name="username" type="text" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false" maxlength="40" required autofocus>
+      <label for="password">Senha</label>
+      <div class="login-pass">
+        <input id="password" name="password" type="password" autocomplete="current-password" maxlength="200" required>
+        <button id="show" class="login-show" type="button" aria-label="Mostrar a senha" aria-pressed="false">👁</button>
+      </div>
+      <button id="go" class="login-go" type="submit">Entrar</button>
+      <div id="msg" class="login-msg" role="alert"></div>
+    </form>
+    <div id="insecure" class="login-warn" hidden>
+      ⚠ Este endereço não tem cadeado (<code>http://</code>): a senha passa aberta pela rede.
+      Num servidor online, use o endereço com <code>https://</code>.
+    </div>
+    <p class="login-help">Sem usuário? Quem instalou o ClawdDesk cria um com <code>npm run user -- add NOME</code>.</p>
+  </main>
+  <script type="module" src="/js/login.js"></script>
+</body>
+</html>

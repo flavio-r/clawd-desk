@@ -1,0 +1,10 @@
+# Caddy na frente do ClawdDesk: pega e renova o certificado HTTPS sozinho e repassa tudo
+# (inclusive o WebSocket /ws) para o contêiner do ClawdDesk.
+{$DOMAIN} {
+	encode zstd gzip
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		-Server
+	}
+	reverse_proxy clawddesk:3456
+}

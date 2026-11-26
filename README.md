@@ -3,7 +3,13 @@
 **Transforme um celular (ou tablet) antigo em um monitor de mesa sempre ligado para o
 [Claude Code](https://docs.claude.com/en/docs/claude-code).** Veja em tempo real o que cada sessão
 está fazendo, seus limites de uso, quanto tempo o Claude trabalhou em cada projeto, e **aprove ou
-negue pedidos de permissão direto pelo celular** — tudo pela sua rede Wi-Fi, sem nuvem.
+negue pedidos de permissão direto pelo celular**.
+
+Dois jeitos de usar, com o mesmo código aberto:
+- **No seu PC** (o padrão): tudo pela sua rede Wi-Fi, sem nuvem e sem cadastro.
+- **Num servidor online, com login e senha:** você instala o ClawdDesk numa VPS (com Docker, em
+  poucos comandos), liga seus PCs a ele e acompanha de qualquer lugar, até pelo 4G.
+  Veja [Instalar num servidor](#instalar-num-servidor-online-com-login).
 
 ![Demonstração do ClawdDesk: o robô trabalhando, um pedido de permissão aprovado pelo celular, uma pergunta com confete e a troca para o tema claro](docs/demo.gif)
 
@@ -106,6 +112,8 @@ sozinho — se ele estiver com a página aberta, nem precisa fazer nada.
 - [Conectar o celular](#conectar-o-celular)
 - [Aprovar pedidos pelo celular](#aprovar-pedidos-pelo-celular)
 - [Outros computadores](#outros-computadores)
+- [Instalar num servidor (online, com login)](#instalar-num-servidor-online-com-login)
+- [Login no modo local (opcional)](#login-no-modo-local-opcional)
 - [Comandos](#comandos)
 - [De onde vêm os números](#de-onde-vêm-os-números)
 - [Configuração](#configuração)
@@ -145,6 +153,11 @@ cada lugar: `🖥 ESTE PC 2 · 🖥 NOTEBOOK 1 · ☁️ WEB 1`. Quando não há
 sessões da web são todas antigas, a linha diz isso. Toque nela para ver como ligar outro computador.
 
 <img src="docs/screenshots/sessoes-origem.png" alt="Painel de sessões com uma sessão deste PC, uma do Notebook (modo satélite) e uma da web, e o rodapé com a contagem de cada origem" width="620">
+
+### 🌐 Online, com usuário e senha
+Instale o ClawdDesk num servidor seu, ligue os PCs a ele e acompanhe de qualquer lugar. A tela pede
+login, tudo vai por HTTPS e o login do Claude nunca sai dos PCs.
+[Como instalar](#instalar-num-servidor-online-com-login).
 
 ### Limites de uso da sua conta
 Janela de 5 horas, limite **semanal**, limites **por modelo** (ex.: Fable "até 50% da semana") e uma
@@ -234,6 +247,8 @@ A escolha fica salva no aparelho.
 - Um **celular ou tablet** com navegador moderno (testado com Chrome no Android) na **mesma rede Wi-Fi**.
 - Para os limites oficiais de 5h/semana: login no Claude Code com uma conta **Pro, Max** (ou plano
   com limites). Contas por API key mostram custo e tokens, mas não esses limites.
+- Opcional, para o [servidor online](#instalar-num-servidor-online-com-login): um servidor com
+  Docker (ou Node.js 18.17+) e um domínio.
 
 ---
 
@@ -375,14 +390,121 @@ Usa o Claude Code em mais de um computador? Deixe tudo na mesma tela:
   - **Tailscale**, com todos os detalhes: instale o [Tailscale](https://tailscale.com/download) nos
     dois computadores, com a mesma conta. Ele cria uma rede privada só entre os seus aparelhos. No
     `npm run link`, use o endereço do principal no Tailscale (começa com `100.`).
+  - **ClawdDesk online**, com todos os detalhes e acesso de qualquer lugar: um servidor com login e
+    HTTPS, ao qual cada PC se liga. Veja [Instalar num servidor](#instalar-num-servidor-online-com-login).
 
-  Não abra o ClawdDesk para a internet com ngrok, Cloudflare Tunnel ou redirecionamento de porta no
-  roteador: a tela não pede senha (veja [Segurança e privacidade](#segurança-e-privacidade)).
+  Não abra o ClawdDesk do seu PC para a internet com ngrok, Cloudflare Tunnel ou redirecionamento
+  de porta no roteador: sem usuário criado, a tela não pede senha (veja
+  [Segurança e privacidade](#segurança-e-privacidade)). Para acessar pela internet, use o servidor.
 
 O rodapé do painel de sessões mostra o que está ligado: este PC, cada outro PC e a web.
 
 > Conversas comuns no claude.ai ou no app (fora do Claude Code) não são sessões de código e não
 > aparecem na lista, mas contam nos limites de uso.
+
+---
+
+## Instalar num servidor (online, com login)
+
+Para acompanhar de qualquer lugar (4G, outro escritório) ou juntar os PCs de uma equipe numa tela
+só, instale o ClawdDesk num servidor. Ele fica protegido por **usuário e senha**, com **HTTPS**.
+
+```
+ PC 1: Claude Code + ClawdDesk ──┐                                    ┌── celular (login)
+ PC 2: Claude Code + ClawdDesk ──┼──▶ https://clawd.seusite.com.br ◀──┼── navegador (login)
+ PC 3: Claude Code + ClawdDesk ──┘    (ClawdDesk em modo servidor)    └── tablet na mesa (login)
+```
+
+- Cada PC continua rodando o ClawdDesk dele (`npm start`), que lê o Claude Code local e envia as
+  sessões, os limites e os pedidos de aprovação para o servidor, só por conexão de saída (HTTPS).
+- O servidor **não lê nada do Claude Code** e **nunca recebe o login nem os tokens do Claude**: só
+  o que os PCs ligados mandam. Para entrar na tela, só com usuário e senha criados por você.
+- Quem estiver logado pode **aprovar pedidos** pelo celular, sem pareamento.
+
+<img src="docs/screenshots/login.png" alt="Tela de login do ClawdDesk online, com usuário e senha" width="260">
+<img src="docs/screenshots/conta-pcs.png" alt="Painel 👤 com o comando para ligar um PC e a lista de PCs ligados, um conectado e outro desconectado" width="520">
+
+### Com Docker (recomendado)
+
+Você precisa de um servidor com **Docker** (qualquer VPS pequena serve), um **domínio** apontado
+para o IP dele (registro A) e as portas **80 e 443** livres. O [Caddy](https://caddyserver.com) vai
+junto e pega o certificado HTTPS sozinho.
+
+1. No servidor, baixe o projeto e crie o arquivo de configuração:
+   ```bash
+   git clone https://github.com/flavio-r/clawd-desk.git
+   ```
+   ```bash
+   cd clawd-desk && cp .env.example .env
+   ```
+2. Edite o `.env`: o `DOMAIN` (ex.: `clawd.seusite.com.br`), o `CLAWDDESK_ADMIN_USER` e uma
+   `CLAWDDESK_ADMIN_PASSWORD` forte (mínimo de 8 caracteres).
+3. Suba:
+   ```bash
+   docker compose up -d
+   ```
+4. Abra `https://SEU_DOMINIO` e entre com o usuário e a senha do `.env`.
+5. Toque em **👤 → Conectar um PC → Gerar código**. Aparece um comando como este; rode-o em cada PC
+   onde você usa o Claude Code (com o ClawdDesk já instalado pelo
+   [passo a passo](#-comece-aqui-passo-a-passo)):
+   ```bash
+   npm run link -- https://clawd.seusite.com.br 123456
+   ```
+   Depois, `npm run restart` (ou `npm start`) nesse PC. O código vale **10 minutos** e **uma vez**.
+
+No mesmo painel 👤 ficam os PCs ligados: dá para **remover** um (ele perde o acesso na hora) e
+**sair** deste aparelho.
+
+**Usuários** (o login vale até 90 dias sem uso; trocar a senha ou remover o usuário derruba os
+aparelhos dele na hora):
+```bash
+docker compose exec clawddesk node scripts/user.js add NOME
+```
+Troque `add` por `passwd` (nova senha), `remove` ou `list`.
+
+**Atualizar:** `git pull && docker compose up -d --build`. Os usuários e os PCs ligados ficam no
+volume `clawddesk-data`, que é o que vale guardar de backup.
+
+### Sem Docker
+
+Com Node.js 18.17+ no servidor:
+
+```bash
+npm ci --omit=dev
+```
+```bash
+npm run user -- add NOME
+```
+```bash
+npm run server
+```
+
+Coloque na frente um proxy com HTTPS que repasse o WebSocket (`/ws`), como Caddy (veja
+`deploy/Caddyfile`) ou nginx. O modo servidor já confia em 1 proxy (`CLAWDDESK_TRUST_PROXY=1`); se
+expuser a porta direto, sem proxy, use `CLAWDDESK_TRUST_PROXY=0`. Não use HTTP puro na internet:
+a senha passaria aberta.
+
+### O que muda no modo servidor
+
+- Os **limites** da conta vêm dos PCs ligados (vale a leitura oficial mais recente). Os gastos de
+  hoje e da semana somam todos os PCs.
+- As **sessões da web e do Controle Remoto** só aparecem na tela de um PC (o servidor não acessa a
+  sua conta do Claude). Ligue o PC ao servidor para ver as sessões dele lá.
+- Os hooks e o statusLine são do PC. No servidor essas rotas nem existem.
+
+---
+
+## Login no modo local (opcional)
+
+Também dá para pedir senha no ClawdDesk do seu PC, por exemplo numa rede compartilhada:
+
+```bash
+npm run user -- add NOME
+```
+
+Depois, `npm run restart`. A tela passa a pedir usuário e senha (no próprio PC também), logado já
+pode aprovar pedidos, e o código para ligar outros PCs é gerado em **👤 → Conectar um PC**. Para
+voltar a como era, remova os usuários (`npm run user -- remove NOME`) e reinicie.
 
 ---
 
@@ -397,6 +519,8 @@ O rodapé do painel de sessões mostra o que está ligado: este PC, cada outro P
 | `npm run remove-hooks` | Remove tudo e restaura seu statusLine original |
 | `npm run link -- <endereço> <código>` | Liga este PC a um ClawdDesk principal ([modo satélite](#outros-computadores)) |
 | `npm run unlink` | Desfaz o `link`: este PC para de enviar as sessões |
+| `npm run user -- add NOME` | Cria um usuário com senha (liga o login). Também `passwd`, `remove` e `list` |
+| `npm run server` | Sobe o ClawdDesk em [modo servidor](#instalar-num-servidor-online-com-login) (online, login obrigatório) |
 | `npm run demo` | Demonstração automática de todos os estados (`npm run demo -- permission` para um só) |
 | `npm run icons` | Regera os ícones do PWA a partir da arte do robô |
 
@@ -448,6 +572,12 @@ Variáveis de ambiente (ex.: `CLAWDDESK_PORT=3457 npm start`):
 | Variável | Padrão | Uso |
 |---|---|---|
 | `CLAWDDESK_PORT` | `3456` | Porta do servidor (rode também `npm run setup-hooks -- --port N`) |
+| `CLAWDDESK_MODE` | `local` | `server` para o [modo servidor](#instalar-num-servidor-online-com-login) (o mesmo que `npm run server`) |
+| `CLAWDDESK_ADMIN_USER` / `CLAWDDESK_ADMIN_PASSWORD` | — | Cria esse usuário ao iniciar (ou atualiza a senha dele). Usado pelo Docker |
+| `CLAWDDESK_LOGIN_DAYS` | `90` | Dias que o login dura sem uso (cada acesso renova) |
+| `CLAWDDESK_PUBLIC_URL` | do navegador | Endereço público usado no comando "Conectar um PC" (ex.: `https://clawd.seusite.com.br`) |
+| `CLAWDDESK_TRUST_PROXY` | `1` no servidor, `0` no PC | Quantos proxies na frente repassam o IP e o HTTPS (`X-Forwarded-*`) |
+| `CLAWDDESK_HOST` | `0.0.0.0` | Interface em que o servidor escuta |
 | `CLAWDDESK_OAUTH` | `1` | `0` desliga a consulta à API de uso do Claude.ai |
 | `CLAWDDESK_OAUTH_POLL_S` | `120` | Intervalo da consulta de uso (mín. 60 s) |
 | `CLAWDDESK_USD_BRL` | cotação do dia | Fixa a cotação do dólar usada para mostrar custos em reais |
@@ -469,15 +599,29 @@ Variáveis de ambiente (ex.: `CLAWDDESK_PORT=3457 npm start`):
 
 - Nenhum dado sai do seu computador, exceto: as consultas opcionais de uso e da lista de sessões em
   `api.anthropic.com`, a cotação do dólar (que só pede "USD-BRL") e, no modo satélite, as sessões
-  enviadas ao ClawdDesk principal **pela rede local**.
+  enviadas ao ClawdDesk principal (pela rede local, ou por HTTPS até o seu servidor online).
+- **O login do Claude nunca sai do PC.** O servidor online não recebe credenciais nem tokens do
+  Claude, só o que os PCs mostram na tela (sessões, limites, pedidos de aprovação).
+- **Login (servidor online ou login ligado no PC):** a senha fica guardada só como hash (scrypt) em
+  `data/users.json`; o login é um cookie `HttpOnly`, `SameSite=Lax` e `Secure` no HTTPS, guardado só
+  como hash. Depois de 10 senhas erradas em 15 minutos (por endereço ou por usuário), o login espera.
+  Trocar a senha ou remover o usuário derruba os aparelhos dele na hora. Aprovar pedidos e mudar algo
+  só vale vindo da própria página (outro site não consegue usar o seu login). A página não pode ser
+  embutida em outro site.
+- **Com login, o código para ligar PCs** é gerado na tela, vale 10 minutos e uma vez só, e deixa de
+  valer depois de 10 tentativas erradas. Um PC removido no painel 👤 perde o acesso na hora.
 - Um computador só entra no modo satélite com o código de pareamento do principal; o principal guarda
   só o hash do token (em `data/paired.json`) e o outro PC guarda o token em `data/hub.json`.
 - `POST /api/event`, `/api/statusline` e `/api/permission/request` só aceitam chamadas do próprio PC.
-- Responder pedidos de permissão exige pareamento (código de 6 dígitos, limite de tentativas).
-- O painel em `:3456` é visível para quem estiver na mesma rede e mostra nomes de projetos, pedidos e
-  arquivos. **Use em uma rede confiável** e não o exponha na internet. Para usar de fora de casa, use
-  uma rede privada entre os seus aparelhos, como o Tailscale.
-- Os dados locais (pareamento, cores, calibração, cotação) ficam em `data/`, fora do git.
+- Sem login, responder pedidos de permissão exige pareamento (código de 6 dígitos, limite de
+  tentativas). Com login, exige estar logado.
+- **Sem usuário criado, o painel em `:3456` é visível para quem estiver na mesma rede** e mostra
+  nomes de projetos, pedidos e arquivos. Use em uma rede confiável, ou ligue o
+  [login no modo local](#login-no-modo-local-opcional). Para usar pela internet, use o
+  [servidor online](#instalar-num-servidor-online-com-login) (com login e HTTPS) ou uma rede privada
+  entre os seus aparelhos, como o Tailscale.
+- Os dados locais (usuários, logins, pareamento, cores, calibração, cotação) ficam em `data/`, fora
+  do git. O `.env` do servidor também fica fora do git.
 
 ---
 
@@ -516,6 +660,15 @@ Depois, apague a pasta do projeto. Seu `settings.json` volta ao que era (com bac
   em outra rede, veja [Outros computadores](#outros-computadores).
 - **`npm run link` diz que o endereço é deste mesmo computador:** o comando foi rodado no principal.
   Ele roda no **outro** computador, aquele cujas sessões você quer ver no principal.
+- **O PC não liga no servidor online:** use o endereço com `https://` e gere um código novo em
+  **👤 → Conectar um PC** (ele vale 10 minutos e uma vez só). Depois do `npm run link`, o ClawdDesk do
+  PC precisa estar rodando (`npm run restart` ou `npm start`). O terminal do PC diz se não conseguiu
+  falar com o servidor.
+- **Esqueci a senha:** no servidor, `docker compose exec clawddesk node scripts/user.js passwd NOME`
+  (sem Docker ou no PC: `npm run user -- passwd NOME`). Ou troque a `CLAWDDESK_ADMIN_PASSWORD` do
+  `.env` e rode `docker compose up -d`.
+- **"Modo servidor sem nenhum usuário":** crie um com `npm run user -- add NOME` ou defina
+  `CLAWDDESK_ADMIN_USER` e `CLAWDDESK_ADMIN_PASSWORD`.
 - **"A porta 3456 já está em uso":** já há um ClawdDesk rodando — use `npm run restart`.
 - **A tela apagou:** toque no 💤 da barra superior (vira 💡) e ligue "Permanecer ativo" nas opções do
   desenvolvedor.
@@ -528,13 +681,14 @@ Depois, apague a pasta do projeto. Seu `settings.json` volta ao que era (com bac
 
 ```
 server/    index.js (HTTP + WebSocket + QR) · state.js (sessões) · usage.js (limites, logs, tempo)
-           approvals.js (aprovar pelo celular) · localsessions.js (sessões abertas neste PC)
+           auth.js (usuários e login) · approvals.js (aprovar pelo celular) · localsessions.js (sessões abertas neste PC)
            websessions.js (sessões da web) · satellite.js (outros computadores)
            git.js · colors.js · fx.js (cotação) · simulator.js
 hooks/     clawddesk-hook.js (eventos) · clawddesk-permission.js (aprovações) · clawddesk-statusline.js
-scripts/   setup.js (assistente) · setup-hooks.js · restart.js · link.js (modo satélite) · demo.js · gen-icons.js
+scripts/   setup.js (assistente) · setup-hooks.js · restart.js · link.js (modo satélite) · user.js (usuários) · demo.js · gen-icons.js
 ClawdDesk.command / ClawdDesk.bat   atalhos de dois cliques (Mac / Windows)
-public/    index.html · manifest.json · sw.js · css/ · js/ · fonts/ · icons/
+Dockerfile · docker-compose.yml · .env.example · deploy/Caddyfile   servidor online (modo servidor + HTTPS)
+public/    index.html · login.html · manifest.json · sw.js · css/ · js/ · fonts/ · icons/
 docs/      demo.gif · screenshots/
 data/      gerado em execução (fora do git)
 ```

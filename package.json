@@ -1,7 +1,7 @@
 {
   "name": "clawd-desk",
   "version": "1.0.0",
-  "description": "Transforma um celular (ou tablet) antigo em um monitor de mesa sempre ligado para o Claude Code: estados em tempo real, limites de uso, avisos e aprovação de permissões pelo celular, pela rede Wi-Fi local.",
+  "description": "Transforma um celular (ou tablet) antigo em um monitor de mesa sempre ligado para o Claude Code: estados em tempo real, limites de uso, avisos e aprovação de permissões pelo celular. Roda no próprio PC (rede Wi-Fi) ou num servidor online com login e senha.",
   "type": "module",
   "main": "server/index.js",
   "private": true,
@@ -13,6 +13,8 @@
     "remove-hooks": "node scripts/setup-hooks.js --uninstall",
     "link": "node scripts/link.js",
     "unlink": "node scripts/link.js --remove",
+    "user": "node scripts/user.js",
+    "server": "node server/index.js --server",
     "demo": "node scripts/demo.js",
     "icons": "node scripts/gen-icons.js"
   },

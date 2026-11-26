@@ -906,6 +906,34 @@ body[data-state='permission'] .flash-border { animation: flashBorder 1s ease-in-
 .pair-input:focus { outline: 2px solid var(--cyan); }
 .pair-row { display: grid; grid-template-columns: 1fr 1fr; gap: calc(var(--u) * 1.4); margin-top: calc(var(--u) * 1.6); }
 .pair-msg { margin-top: calc(var(--u) * 1.4); min-height: 1.2em; font-family: var(--mono); font-size: 0.85em; color: var(--cyan-soft); }
+/* conta e PCs ligados (com login) */
+.acct-sec { margin-top: calc(var(--u) * 2.4); }
+.acct-title { font-family: var(--mono); font-size: 0.78em; letter-spacing: 0.1em; color: var(--title); }
+.acct-wide { width: 100%; }
+.acct-code { margin-top: calc(var(--u) * 1.2); }
+.acct-code code {
+  display: block;
+  font-family: var(--mono);
+  font-size: 0.92em;
+  color: var(--cyan);
+  background: var(--btn-bg);
+  border: 1px solid var(--line);
+  padding: 0.7em 0.8em;
+  word-break: break-all;
+  -webkit-user-select: all;
+  user-select: all;
+}
+.acct-row { display: flex; align-items: center; justify-content: space-between; gap: calc(var(--u) * 1.4); margin-top: calc(var(--u) * 1); }
+.acct-row .sim-btn { padding: 0.45em 1em; }
+.acct-note { color: var(--dim); font-size: 0.85em; }
+.acct-devices { margin-top: calc(var(--u) * 1); display: grid; gap: calc(var(--u) * 0.8); }
+.acct-dev { display: flex; align-items: center; gap: calc(var(--u) * 1.4); padding: 0.5em 0.6em; border: 1px solid var(--card-line); background: var(--card-bg); }
+.acct-dev-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.acct-dev-name small { display: block; color: var(--dim); font-family: var(--mono); font-size: 0.75em; }
+.acct-dev[data-online='1'] .acct-dev-name small { color: var(--green); }
+.acct-dev .sim-btn { padding: 0.4em 0.8em; color: var(--rose-soft); }
+.acct-empty { color: var(--dim); font-size: 0.9em; }
+#acct-panel .sim-btn.stop { margin-top: calc(var(--u) * 2); }
 .pc-code { margin-top: calc(var(--u) * 1.6); color: var(--dim); font-size: 0.9em; }
 .pc-code b { font-family: var(--mono); font-size: 1.6em; color: var(--cyan); letter-spacing: 0.12em; }
 .sim-pair { display: flex; align-items: center; justify-content: space-between; gap: calc(var(--u) * 1.4); margin: calc(var(--u) * 0.6) 0 calc(var(--u) * 1.4); color: var(--text-2); font-size: 0.9em; }

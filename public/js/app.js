@@ -80,6 +80,12 @@ const local = {
 };
 let token = local.get('cd.token');
 let paired = false;
+// login (ClawdDesk online ou login ligado no PC) e modo de execução: 'local' ou 'server'
+let access = { login: false, user: null, mode: local.get('cd.mode') || 'local' };
+const serverMode = () => (snap && snap.mode ? snap.mode : access.mode) === 'server';
+function goLogin() {
+  if (!/\/login$/.test(location.pathname)) location.replace('/login');
+}
 
 let snap = null;
 let clockOffset = 0; // relógio do PC − relógio do celular
@@ -131,7 +137,13 @@ function connect() {
       return;
     }
     if (m.type === 'snapshot') onSnapshot(m.data);
-    else if (m.type === 'auth') {
+    else if (m.type === 'login-required') goLogin();
+    else if (m.type === 'access') {
+      access = { login: !!m.login, user: m.user || null, mode: m.mode === 'server' ? 'server' : 'local' };
+      local.set('cd.mode', access.mode);
+      renderAccess();
+    } else if (m.type === 'auth') {
+      if (m.login) access = { ...access, login: true, user: m.user || access.user };
       paired = !!m.paired;
       if (!paired && token) {
         token = null; // pareamento revogado no PC
@@ -141,7 +153,8 @@ function connect() {
       render();
     }
   };
-  ws.onclose = () => {
+  ws.onclose = (ev) => {
+    if (ev && ev.code === 4401) return goLogin(); // login expirou, saiu ou foi removido
     if (connected) disconnectedAt = Date.now();
     connected = false;
     connecting = false;
@@ -513,6 +526,7 @@ async function decide(ev, item, id, decision) {
       item.action = decision;
       sfx.play('tick');
     } else {
+      if (r.status === 401 && j.login) return goLogin();
       if (r.status === 401) {
         token = null;
         paired = false;
@@ -536,6 +550,7 @@ async function decide(ev, item, id, decision) {
 
 // ---- janela de pareamento
 function openPair() {
+  if (access.login) return openAccount(); // com login, não precisa parear: abre a conta
   renderPairState();
   $('pair-msg').textContent = '';
   $('pair-panel').hidden = false;
@@ -545,8 +560,131 @@ function openPair() {
 function renderPairState() {
   $('pair-form').hidden = paired;
   $('pair-done').hidden = !paired;
-  sim.setPairStatus(paired);
+  sim.setPairStatus(paired, access.login);
 }
+
+// ---- conta e PCs ligados (com login)
+function renderAccess() {
+  $('acct').hidden = !access.login;
+  setText($('acct-user'), access.user || '');
+  renderPairState();
+  if (snap) render();
+}
+
+function openAccount() {
+  setText($('acct-msg'), '');
+  $('acct-panel').hidden = false;
+  loadDevices();
+}
+
+const fmtDay = (ts) => (ts ? new Date(ts).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }) : '');
+async function loadDevices() {
+  const box = $('acct-devices');
+  try {
+    const r = await fetch('/api/devices');
+    if (r.status === 401) return goLogin();
+    const list = await r.json();
+    box.textContent = '';
+    const pcs = list;
+    if (!pcs.length) {
+      const e = document.createElement('div');
+      e.className = 'acct-empty';
+      e.textContent = 'Nenhum PC ligado ainda. Gere um código acima e rode o comando no PC.';
+      box.appendChild(e);
+      return;
+    }
+    for (const d of pcs) {
+      const row = document.createElement('div');
+      row.className = 'acct-dev';
+      row.dataset.online = d.online ? '1' : '0';
+      const name = document.createElement('span');
+      name.className = 'acct-dev-name';
+      const isPc = /^PC:/.test(d.label) || d.host;
+      name.textContent = `${isPc ? '🖥' : '📱'}\u00a0 ${d.host || d.label.replace(/^PC:\s*/, '')}`;
+      const small = document.createElement('small');
+      small.textContent = `${d.online ? 'conectado agora' : 'desconectado'} · ligado em ${fmtDay(d.createdAt)}`;
+      name.appendChild(small);
+      const rm = document.createElement('button');
+      rm.type = 'button';
+      rm.className = 'sim-btn ghost';
+      rm.textContent = 'Remover';
+      rm.addEventListener('click', () => removeDevice(d, name.firstChild.textContent));
+      row.append(name, rm);
+      box.appendChild(row);
+    }
+  } catch {
+    setText($('acct-msg'), '✕ Sem conexão com o ClawdDesk.');
+  }
+}
+
+async function removeDevice(d, label) {
+  if (!confirm(`Remover ${label.replace(/^\S+ /, '')}? Ele perde o acesso a este ClawdDesk. Para ligar de novo, gere outro código.`)) return;
+  try {
+    const r = await fetch('/api/devices/remove', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: d.id }) });
+    if (r.status === 401) return goLogin();
+    const j = await r.json().catch(() => ({}));
+    setText($('acct-msg'), j.ok ? '✓ PC removido.' : `✕ ${j.error || 'não deu certo'}`);
+  } catch {
+    setText($('acct-msg'), '✕ Sem conexão com o ClawdDesk.');
+  }
+  loadDevices();
+}
+
+let codeTimer = null;
+$('acct-gen').addEventListener('click', async () => {
+  setText($('acct-msg'), '');
+  try {
+    const r = await fetch('/api/link-code', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+    if (r.status === 401) return goLogin();
+    const j = await r.json();
+    if (!j.code) throw new Error(j.error);
+    setText($('acct-cmd'), `npm run link -- ${j.url} ${j.code.replace(/\s/g, '')}`);
+    $('acct-code').hidden = false;
+    setText($('acct-gen'), 'Gerar outro código');
+    clearInterval(codeTimer);
+    const tick = () => {
+      const left = j.expiresAt - now();
+      if (left <= 0) {
+        clearInterval(codeTimer);
+        setText($('acct-exp'), 'Código vencido: gere outro.');
+        return;
+      }
+      setText($('acct-exp'), `Vale por ${Math.ceil(left / 60e3)} min, uma vez só.`);
+    };
+    tick();
+    codeTimer = setInterval(tick, 5e3);
+  } catch (e) {
+    setText($('acct-msg'), `✕ ${(e && e.message) || 'Sem conexão com o ClawdDesk.'}`);
+  }
+});
+$('acct-copy').addEventListener('click', async () => {
+  const txt = $('acct-cmd').textContent;
+  try {
+    await navigator.clipboard.writeText(txt);
+    setText($('acct-msg'), '✓ Comando copiado.');
+  } catch {
+    // sem área de transferência (http): seleciona para copiar à mão
+    const sel = window.getSelection();
+    const range = document.createRange();
+    range.selectNodeContents($('acct-cmd'));
+    sel.removeAllRanges();
+    sel.addRange(range);
+    setText($('acct-msg'), 'Selecionado: copie com Ctrl+C (ou segure e copie).');
+  }
+});
+$('acct').addEventListener('click', openAccount);
+$('acct-close').addEventListener('click', () => ($('acct-panel').hidden = true));
+$('acct-panel').addEventListener('click', (e) => {
+  if (e.target === $('acct-panel')) $('acct-panel').hidden = true;
+});
+$('acct-logout').addEventListener('click', async () => {
+  try {
+    await fetch('/api/logout', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+  } catch {
+    /* sem conexão: o cookie vence sozinho */
+  }
+  location.replace('/login');
+});
 
 async function doPair() {
   const code = $('pair-code').value.replace(/\D/g, '');
@@ -600,8 +738,8 @@ function renderCore(state, mood, p, s, t) {
   let meta = '';
   if (state === 'offline') {
     label = 'Sem conexão';
-    detail = 'Procurando o PC…';
-    meta = `rode "npm start" no PC · ${location.host}`;
+    detail = serverMode() ? 'Procurando o servidor…' : 'Procurando o PC…';
+    meta = serverMode() ? `servidor fora do ar? · ${location.host}` : `rode "npm start" no PC · ${location.host}`;
   } else if (mood === 'warning') {
     const u = s.usage;
     const cands = [['5h', u.fiveHour], ['Semana', u.sevenDay], ...(u.models || []).map((m) => [m.name, m])];
@@ -610,7 +748,11 @@ function renderCore(state, mood, p, s, t) {
     detail = `${w[0]} em ${fmtPct(w[1].pct)}%`;
     meta = w[1].resetsAt ? `reinicia em ${fmtDuration(w[1].resetsAt - t)}` : '';
   } else if (state === 'idle') {
-    if (!p && s && !s.hooks.count && !(s.sim && s.sim.active)) {
+    if (!p && s && serverMode() && !(s.sim && s.sim.active)) {
+      const pcs = (s.remote && s.remote.satellites) || [];
+      detail = pcs.length ? 'Aguardando o Claude Code' : 'Nenhum PC ligado';
+      meta = pcs.length ? `${pcs.length} ${pcs.length === 1 ? 'PC ligado' : 'PCs ligados'}` : 'ligue um em 👤 → Conectar um PC';
+    } else if (!p && s && !s.hooks.count && !(s.sim && s.sim.active)) {
       detail = 'Aguardando o Claude Code';
       meta = 'no PC: npm run setup-hooks';
     } else if (p && p.lastDone) {
@@ -877,11 +1019,12 @@ function renderLimits(u, t) {
   const src = w.source || f.source;
   let note = '';
   if (src === 'simulação') note = 'SIMULAÇÃO';
+  else if (src === 'estimativa' && serverMode()) note = w.pct == null ? 'SEM DADOS' : 'ESTIMADO PELOS PCS';
   else if (src === 'estimativa') note = w.pct == null ? 'SEM DADOS OFICIAIS' : 'SÓ ESTE PC';
   else if (w.extrapolated) note = '≈ ESTIMADO';
   else if (w.updatedAt) note = `OFICIAL · ${fmtDuration(Date.now() - w.updatedAt)}`;
   setText($('limits-note'), note);
-  renderLimitsHint(src === 'estimativa' ? u.oauth : null);
+  renderLimitsHint(src !== 'estimativa' ? null : serverMode() ? (u.oauth === 'servidor' ? 'servidor' : 'servidor-est') : u.oauth);
 }
 
 // Quando os limites vêm só dos logs deste computador, diz por quê e como ver a conta toda.
@@ -892,6 +1035,8 @@ const LIMITS_HINTS = {
   disabled: 'Só o uso deste PC: a consulta à conta está desligada (CLAWDDESK_OAUTH=0).',
   limitado: 'Só o uso deste PC por enquanto: a API de uso pediu uma pausa.',
   erro: 'Só o uso deste PC por enquanto: sem resposta da API de uso.',
+  servidor: 'Os limites chegam dos PCs ligados a este ClawdDesk. Nenhum PC enviou ainda: ligue um em 👤 → Conectar um PC.',
+  'servidor-est': 'Estimativa com o uso dos PCs ligados: nenhum deles mandou ainda a leitura oficial da conta.',
 };
 function renderLimitsHint(status) {
   const el = $('limits-hint');
@@ -1028,7 +1173,10 @@ function renderSessions(s, p, t) {
     if (!n) {
       const e = document.createElement('div');
       e.className = 'session-empty';
-      e.textContent = s && !s.hooks.count ? 'Nenhuma sessão ainda — rode "npm run setup-hooks" no PC.' : 'Nenhuma sessão do Claude Code aberta.';
+      if (serverMode()) {
+        const pcs = (s && s.remote && s.remote.satellites) || [];
+        e.textContent = pcs.length ? 'Nenhuma sessão do Claude Code aberta nos PCs ligados.' : 'Nenhum PC ligado ainda — toque em 👤 → Conectar um PC.';
+      } else e.textContent = s && !s.hooks.count ? 'Nenhuma sessão ainda — rode "npm run setup-hooks" no PC.' : 'Nenhuma sessão do Claude Code aberta.';
       list.appendChild(e);
       return;
     }
@@ -1108,7 +1256,9 @@ function renderSources(s) {
   box.hidden = !r;
   if (!r) return;
   const sessions = s.sessions || [];
-  const items = [{ t: `🖥 ESTE PC ${sessions.filter((x) => !x.origin).length}`, k: 'local' }];
+  const server = s.mode === 'server';
+  // no servidor online não há "este PC": só os PCs ligados a ele
+  const items = server ? [] : [{ t: `🖥 ESTE PC ${sessions.filter((x) => !x.origin).length}`, k: 'local' }];
   if (r.link) {
     const hub = String(r.link.hub || 'principal').toUpperCase();
     items.push(r.link.linked ? { t: `🛰 ENVIANDO P/ ${hub}`, k: 'pc' } : { t: `🛰 ${hub}: SEM CONEXÃO`, k: 'warn' });
@@ -1117,9 +1267,11 @@ function renderSources(s) {
     const host = String(sat.host || 'PC').toUpperCase();
     items.push(sat.online ? { t: `🖥 ${host} ${sat.sessions}`, k: 'pc' } : { t: `🖥 ${host}: DESLIGADO`, k: 'off' });
   }
-  if (!r.link && !(r.satellites || []).length) items.push({ t: '🖥 OUTROS PCS: NENHUM', k: 'off' });
+  if (!r.link && !(r.satellites || []).length) items.push(server ? { t: '🖥 NENHUM PC LIGADO', k: 'warn' } : { t: '🖥 OUTROS PCS: NENHUM', k: 'off' });
   const w = r.web || {};
-  if (w.status === 'ok') {
+  if (server) {
+    /* sessões da web e do Controle Remoto só são lidas no próprio PC */
+  } else if (w.status === 'ok') {
     items.push({ t: `☁️ WEB ${w.web || 0}`, k: w.web ? 'web' : 'off' });
     if (w.remote) items.push({ t: `📡 CONTROLE REMOTO ${w.remote}`, k: 'remote' });
   } else {
@@ -1146,14 +1298,19 @@ function renderSources(s) {
       : w.status === 'desativado'
         ? '☁️ Web: desligada neste PC (CLAWDDESK_WEB=0).'
         : '☁️ Web: precisa do login do Claude Code no terminal deste PC (claude auth login).';
-  setText($('sh-web'), webLine);
+  setText($('sh-web'), server ? '' : webLine);
+  $('sh-web').hidden = server;
+  $('sh-remote').hidden = server;
+  setText($('sh-lan-title'), server ? 'Ligar um PC' : 'Outro PC na mesma rede');
+  setText($('sh-code-where'), server || access.login ? 'O código é gerado em 👤 → Conectar um PC.' : 'O código aparece no terminal deste PC.');
 }
 function toggleSourcesHint() {
   const h = $('sources-hint');
   h.hidden = !h.hidden;
   // endereço deste PC como o celular enxerga (no próprio PC, "localhost" não serve para o outro)
   const host = location.hostname;
-  setText($('sh-addr'), host && !/^(localhost|127\.|\[?::1)/.test(host) ? host : 'ENDEREÇO');
+  const addr = location.protocol === 'https:' ? location.origin : host;
+  setText($('sh-addr'), host && !/^(localhost|127\.|\[?::1)/.test(host) ? addr : 'ENDEREÇO');
   if (snap) renderSources(snap);
 }
 

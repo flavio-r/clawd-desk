@@ -1,12 +1,14 @@
 #!/usr/bin/env node
 // npm run link — liga ESTE computador a um ClawdDesk principal (o que está com o celular).
 //
-//   npm run link -- 192.168.0.10 123456     endereço do principal + código de pareamento dele
-//   npm run link                            pergunta os dois
-//   npm run unlink                          desfaz (este PC para de enviar)
+//   npm run link -- 192.168.0.10 123456              principal na mesma rede + código de pareamento
+//   npm run link -- https://clawd.seusite.com 123456  ClawdDesk online (modo servidor)
+//   npm run link                                     pergunta os dois
+//   npm run unlink                                   desfaz (este PC para de enviar)
 //
-// O endereço e o código aparecem no terminal do ClawdDesk principal ("No celular: http://…" e
-// "Código para parear…"). Depois de ligar, reinicie o ClawdDesk deste PC (npm run restart).
+// Na rede local, o endereço e o código aparecem no terminal do ClawdDesk principal ("No celular:
+// http://…" e "Código para parear…"). Com login (ClawdDesk online), o código é gerado na tela:
+// 👤 → Conectar um PC. Depois de ligar, reinicie o ClawdDesk deste PC (npm run restart).
 import fs from 'node:fs';
 import readline from 'node:readline';
 import * as cfg from '../server/config.js';
@@ -25,13 +27,18 @@ async function ask(q) {
   return a.trim();
 }
 
+// "192.168.0.10" → http://192.168.0.10:3456 · "clawd.seusite.com" → https://clawd.seusite.com
 function normalize(addr) {
   let a = String(addr || '').trim();
   if (!a) return null;
-  if (!/^https?:\/\//i.test(a)) a = `http://${a}`;
+  if (!/^https?:\/\//i.test(a)) {
+    const host = a.split('/')[0];
+    const local = /^(localhost|\d{1,3}(\.\d{1,3}){3}|\[[0-9a-f:]+\])(:\d+)?$/i.test(host) || /\.(local|lan|home)(:\d+)?$/i.test(host) || /:\d+$/.test(host) || !host.includes('.');
+    a = `${local ? 'http' : 'https'}://${a}`;
+  }
   try {
     const u = new URL(a);
-    if (!u.port) u.port = '3456';
+    if (!u.port && u.protocol === 'http:') u.port = '3456';
     return `${u.protocol}//${u.host}`;
   } catch {
     return null;
@@ -62,7 +69,8 @@ async function unlink() {
 async function link() {
   console.log(`\n  ${c.b('🛰  Ligar este PC a um ClawdDesk principal')}`);
   console.log(c.d('  As sessões do Claude Code deste PC vão aparecer na tela (e no celular) do outro.'));
-  console.log(c.d('  No terminal do principal estão o endereço ("No celular: http://…") e o código.\n'));
+  console.log(c.d('  Na mesma rede: o endereço ("No celular: http://…") e o código estão no terminal do principal.'));
+  console.log(c.d('  ClawdDesk online: use o endereço https:// dele e gere o código na tela (👤 → Conectar um PC).\n'));
 
   let url = normalize(args[0] || (await ask('Endereço do ClawdDesk principal (ex.: 192.168.0.10):')));
   if (!url) {
@@ -81,17 +89,23 @@ async function link() {
   }
 
   // é mesmo um ClawdDesk?
+  let info;
   try {
-    const r = await fetch(`${url}/api/info`, { signal: AbortSignal.timeout(5000) });
-    const j = await r.json();
-    if (!r.ok || !j || !j.port) throw new Error('resposta estranha');
+    const r = await fetch(`${url}/api/info`, { signal: AbortSignal.timeout(8000) });
+    info = await r.json();
+    if (!r.ok || !info || !info.port) throw new Error('resposta estranha');
   } catch {
     console.error(c.r(`  ✖ Não achei um ClawdDesk em ${url}.`));
-    console.error('    Confira se ele está aberto no outro PC, se o endereço está certo e se os dois estão no mesmo Wi-Fi.\n');
+    if (u.protocol === 'https:') console.error('    Confira se o endereço está certo e se o servidor está no ar (abra-o no navegador).\n');
+    else console.error('    Confira se ele está aberto no outro PC, se o endereço está certo e se os dois estão no mesmo Wi-Fi.\n');
     process.exit(1);
   }
+  if (info.login && u.protocol === 'http:' && !/^(\d{1,3}\.){3}\d{1,3}$|^localhost$|\.(local|lan|home)$/i.test(u.hostname)) {
+    console.log(c.y('  ⚠ Esse ClawdDesk tem login, mas o endereço é http:// (sem cadeado). Se ele tiver https://, prefira.'));
+  }
 
-  const code = String(args[1] || (await ask('Código de pareamento (6 dígitos, aparece no terminal do principal):'))).replace(/\D/g, '');
+  const where = info.login ? 'gere na tela dele: 👤 → Conectar um PC' : 'aparece no terminal do principal';
+  const code = String(args[1] || (await ask(`Código de pareamento (6 dígitos; ${where}):`))).replace(/\D/g, '');
   if (code.length !== 6) {
     console.error(c.r('  ✖ O código tem 6 dígitos. Ex.: npm run link -- 192.168.0.10 123456\n'));
     process.exit(1);
@@ -111,7 +125,8 @@ async function link() {
   }
   if (!j || !j.ok || !j.token) {
     console.error(c.r(`  ✖ Pareamento recusado: ${(j && j.error) || 'erro desconhecido'}.`));
-    console.error('    O código muda toda vez que o ClawdDesk principal reinicia — confira o atual no terminal dele.\n');
+    if (info.login) console.error('    O código vale 10 minutos e uma vez só. Gere outro na tela: 👤 → Conectar um PC.\n');
+    else console.error('    O código muda toda vez que o ClawdDesk principal reinicia — confira o atual no terminal dele.\n');
     process.exit(1);
   }
   fs.mkdirSync(cfg.DATA_DIR, { recursive: true });

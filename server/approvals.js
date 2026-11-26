@@ -6,6 +6,8 @@
 //
 // Segurança: só aparelhos pareados (código de 6 dígitos mostrado no terminal do PC) podem
 // responder. O token do aparelho é guardado apenas como hash em data/paired.json.
+// Com login ligado (servidor online), quem responde é quem está logado, e o código serve só para
+// ligar PCs: é gerado na tela, vale 10 minutos, uma vez só, e cai depois de 10 tentativas erradas.
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -21,6 +23,9 @@ export class Approvals extends EventEmitter {
   constructor() {
     super();
     this.code = String(crypto.randomInt(0, 1e6)).padStart(6, '0');
+    this.oneTime = false; // códigos de uso único gerados na tela (login ligado)
+    this.codeExpiresAt = 0;
+    this.codeFails = 0;
     this.devices = this.load(); // [{ hash, label, createdAt, lastSeen }]
     this.pending = new Map(); // id -> { id, sessionId, project, tool, createdAt, expiresAt, res, timer }
     this.attempts = new Map(); // ip -> [timestamps] (limite de tentativas de pareamento)
@@ -46,7 +51,20 @@ export class Approvals extends EventEmitter {
   }
 
   get codeFormatted() {
-    return `${this.code.slice(0, 3)} ${this.code.slice(3)}`;
+    return this.code ? `${this.code.slice(0, 3)} ${this.code.slice(3)}` : '';
+  }
+
+  // Login ligado: sem código fixo; cada PC novo usa um código gerado na tela.
+  useOneTimeCodes() {
+    this.oneTime = true;
+    this.code = null;
+  }
+
+  newCode() {
+    this.code = String(crypto.randomInt(0, 1e6)).padStart(6, '0');
+    this.codeExpiresAt = Date.now() + 10 * 60e3;
+    this.codeFails = 0;
+    return { code: this.codeFormatted, expiresAt: this.codeExpiresAt };
   }
 
   // ---- pareamento
@@ -55,12 +73,19 @@ export class Approvals extends EventEmitter {
     const recent = (this.attempts.get(ip) || []).filter((t) => now - t < 60e3);
     if (recent.length >= 5) return { ok: false, error: 'muitas tentativas — espere 1 minuto' };
     const clean = String(code || '').replace(/\D/g, '');
-    if (clean !== this.code) {
+    if (this.oneTime && (!this.code || now > this.codeExpiresAt)) {
+      this.code = null;
+      return { ok: false, error: 'código expirado ou já usado — gere outro na tela do ClawdDesk' };
+    }
+    if (!this.code || clean.length !== 6 || !crypto.timingSafeEqual(Buffer.from(clean), Buffer.from(this.code))) {
       recent.push(now);
       this.attempts.set(ip, recent);
+      // código de uso único: depois de 10 erros (de qualquer endereço) ele deixa de valer
+      if (this.oneTime && ++this.codeFails >= 10) this.code = null;
       return { ok: false, error: 'código incorreto' };
     }
     this.attempts.delete(ip);
+    if (this.oneTime) this.code = null;
     const token = crypto.randomBytes(24).toString('hex');
     this.devices.push({ hash: sha(token), label: String(label || 'aparelho').slice(0, 40), createdAt: now, lastSeen: now });
     this.save();
@@ -74,6 +99,19 @@ export class Approvals extends EventEmitter {
     const d = this.devices.find((x) => x.hash === h);
     if (d) d.lastSeen = Date.now();
     return d || null;
+  }
+
+  devicesView() {
+    return this.devices.map((d) => ({ id: d.hash.slice(0, 12), label: d.label, createdAt: d.createdAt, lastSeen: d.lastSeen }));
+  }
+
+  removeDevice(id) {
+    const d = this.devices.find((x) => x.hash.slice(0, 12) === id);
+    if (!d) return null;
+    this.devices = this.devices.filter((x) => x !== d);
+    this.save();
+    this.emit('change');
+    return d;
   }
 
   unpair(token) {
@@ -134,8 +172,8 @@ export class Approvals extends EventEmitter {
     return item;
   }
 
-  decide(id, decision, token) {
-    if (!this.verify(token)) return { ok: false, status: 401, error: 'aparelho não pareado' };
+  // quem pode responder (aparelho pareado ou login) é conferido antes, no index.js
+  decide(id, decision) {
     if (decision !== 'allow' && decision !== 'deny') return { ok: false, status: 400, error: 'decisão inválida' };
     const item = this.resolve(id, decision, 'celular');
     if (!item) return { ok: false, status: 410, error: 'esse pedido já foi respondido ou expirou' };
